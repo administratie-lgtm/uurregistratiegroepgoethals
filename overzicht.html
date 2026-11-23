@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Maandoverzicht Uren</title>
+<style>
+  body { font: 13px system-ui, sans-serif; max-width: 1000px; margin: 15px auto; padding: 0 15px; color: #222; }
+  .box { background: #f8f9fa; border: 1px solid #ddd; border-radius: 8px; padding: 14px; margin-bottom: 16px; }
+  .rij { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  input, select, button { font: inherit; padding: 7px 11px; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+  button { background: #111; color: #fff; cursor: pointer; border: none; }
+  button.sec { background: #2e7d32; }
+  button.uit { background: #666; margin-left: auto; }
+  .kop { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 14px; }
+  .badges { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .stat { padding: 10px 16px; border-radius: 8px; min-width: 130px; text-align: center; }
+  .stat b { display: block; font-size: 20px; margin-bottom: 2px; }
+  .s-blauw { background: #0288d1; color: #fff; }
+  .s-groen { background: #e8f5e9; color: #1b5e20; border: 1px solid #c8e6c9; }
+  .s-grijs { background: #eceff1; color: #37474f; border: 1px solid #cfd8dc; }
+  table { width: 100%; border-collapse: collapse; background: #fff; font-size: 12.5px; }
+  th, td { border: 1px solid #e0e0e0; padding: 6px 8px; text-align: left; }
+  th { background: #f1f3f4; font-weight: 600; }
+  tr.weekend { background: #fafafa; color: #777; }
+  .rechts { text-align: right; font-variant-numeric: tabular-nums; }
+  .verborgen { display: none; }
+  .watermerk { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 450px; height: 450px;
+    background-image: url('logo.png'); background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.12; z-index: -1; pointer-events: none;}
+       @page {
+    size: A4 portrait;
+    margin: 10mm 10mm 14mm 10mm;
+    @bottom-right { content: counter(page) "/" counter(pages); font: 10px system-ui, sans-serif; color: #666; }
+  }
+  @media print {
+    .no-print, body > :not(#app-vak):not(#bulk-print-vak) { display: none !important; }
+    body { margin: 0; padding: 0; max-width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .kop { margin-bottom: 8px; padding-bottom: 6px; }
+    .badges { margin-bottom: 10px; gap: 8px; }
+    .stat { padding: 6px 12px; min-width: 100px; }
+    .stat b { font-size: 16px; }
+    table { font-size: 11px; width: 100%; }
+    th, td { padding: 4.5px 10px; white-space: nowrap; }
+    thead { display: table-header-group; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+  }
+    body.bulk-print #app-vak { display: none !important; }
+    body.bulk-print #bulk-print-vak { display: block !important; }
+    .pagina-einde { page-break-after: always; break-after: page; }
+    .pagina-einde:last-child { page-break-after: auto; break-after: auto; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="xlsx.full.min.js"></script>
+</head>
+<body>
+
+  <div id="login-vak" class="box no-print" style="max-width:400px;margin:40px auto;">
+    <h2>Inloggen Urenoverzicht</h2>
+    <input id="email" type="email" placeholder="E-mailadres" style="width:92%;margin-bottom:8px;"><br>
+    <input id="wachtwoord" type="password" placeholder="Wachtwoord" style="width:92%;margin-bottom:10px;"><br>
+    <button onclick="inloggen()">Inloggen</button>
+    <p id="foutmelding" style="color:red;"></p>
+  </div>
+
+  <div id="app-vak" class="verborgen">
+    <div class="box no-print">
+      <div class="rij">
+        <div>
+          <label><b>Bedrijf:</b></label><br>
+          <select id="bedrijf-keuze" onchange="filterMedewerkers()"></select>
+        </div>
+        <div>
+          <label><b>Medewerker:</b></label><br>
+          <select id="medewerker-keuze" onchange="laadMaandstaat()"></select>
+        </div>
+        <div>
+          <label><b>Maand:</b></label><br>
+          <input type="month" id="maand-keuze" onchange="laadMaandstaat()">
+        </div>
+        <div style="margin-top:8px;">
+          <button onclick="window.print()">Afdrukken / PDF</button>
+          <button onclick="printAlles()">Print / PDF Alles</button>
+          <button class="sec" onclick="exporteerExcel()">Exporteer Excel (CSV)</button>
+          <button class="sec" onclick="exporteerAllesExcel()">Exporteer Alles (Excel)</button>
+        </div>
+        <button class="uit" onclick="uitloggen()">Uitloggen</button>
+      </div>
+    </div>
+      <div style="position:relative; display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; font-size:11px; color:#555;"> 
+    <span id="afdruktijd"></span>
+    <img src="logo.png" alt="Logo" style="position:absolute; left:50%; top:0px; transform:translateX(-50%); height:80px; z-index:-1; pointer-events:none;"> 
+    <span>Maandoverzicht Uren</span> 
+  </div> 
+
+    <div class="kop">
+      <div>
+        <h2 id="rapport-naam" style="margin:0;">-</h2>
+        <span id="rapport-bedrijf" style="color:#666;"></span>
+      </div>
+      <div id="rapport-periode" style="font-weight:600;color:#444;"></div>
+    </div>
+
+    <div class="badges">
+      <div class="stat s-blauw"><b id="tot-gewerkt">00:00</b>Totale gewerkte uren</div>
+      <div class="stat s-groen"><b id="tot-pauze">00:00</b>Totale pauze</div>
+      <div class="stat s-grijs"><b id="tot-dagen">0</b>Gewerkte dagen</div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Dag</th>
+          <th>Locatie / Stal</th>
+          <th>Inklokken</th>
+          <th>Uitklokken</th>
+          <th class="rechts">Pauze</th>
+          <th class="rechts">Netto uren</th>
+          <th class="no-print"></th>
+        </tr>
+      </thead>
+      <tbody id="maand-tabel"></tbody>
+    </table>
+  </div><div id="bulk-print-vak" class="verborgen"></div>
+    <div id="bewerk-modal" class="verborgen no-print" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:999;align-items:center;justify-content:center;">
+    <div style="background:#fff;padding:20px;border-radius:10px;max-width:520px;width:92%;box-shadow:0 4px 20px rgba(0,0,0,0.2);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h3 id="bewerk-titel" style="margin:0;font-size:16px;">Registraties aanpassen</h3>
+        <button class="sec" onclick="sluitBewerkModal()" style="padding:4px 10px;">✕</button>
+      </div>
+      <div id="bewerk-bestaand" style="margin-bottom:16px;"></div>
+      <div style="border-top:1px solid #eee;padding-top:12px;">
+        <b style="font-size:13px;">+ Nieuwe registratie toevoegen op deze dag:</b>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <select id="nieuw-type" style="padding:6px;">
+            <option value="dag_start">Dag starten</option>
+            <option value="pauze_start">Pauze starten</option>
+            <option value="pauze_einde">Pauze beëindigen</option>
+            <option value="dag_einde">Dag beëindigen</option>
+          </select>
+          <input id="nieuw-tijd" type="time" style="padding:6px;">
+          <select id="nieuw-plaats" style="padding:6px;"></select>
+          <button onclick="voegRegistratieToe()" style="padding:6px 12px;">Toevoegen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+<script>
+ const SUPABASE_URL="https://aalyfgtulrlmpkegkzub.supabase.co", SUPABASE_KEY="sb_publishable_bkZUQu-mzukYkvwfQHzPhw_Z9I84E0c";
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  let alleMensen = [];
+  let plaatsenMap = {};
+  let huidigeExportData = [];
+  let huidigePerDag = {};
+  let bewerkDatumInfo = null;
+
+  function formatMinuten(min) {
+    const m = Math.max(0, Math.round(min));
+    const u = Math.floor(m / 60);
+    const rest = m % 60;
+    return String(u).padStart(2, "0") + ":" + String(rest).padStart(2, "0");
+  }
+
+  async function inloggen() {
+    const email = document.getElementById("email").value;
+    const password = document.getElementById("wachtwoord").value;
+    const { error } = await db.auth.signInWithPassword({ email, password });
+    if (error) {
+      document.getElementById("foutmelding").textContent = "Inloggen mislukt: " + error.message;
+    } else {
+      startApp();
+    }
+  }
+
+  async function startApp() {
+    const { data: { user } } = await db.auth.getUser();
+    if (!user) return;
+
+    document.getElementById("login-vak").classList.add("verborgen");
+    document.getElementById("app-vak").classList.remove("verborgen");
+    document.getElementById("maand-keuze").value = new Date().toISOString().slice(0, 7);
+
+    const [teamRes, plaatsRes] = await Promise.all([
+      db.from("profiles").select("id, naam, bedrijf").order("naam"),
+      db.from("plaatsen").select("id, naam")
+    ]);
+
+    alleMensen = teamRes.data || [];
+    (plaatsRes.data || []).forEach(p => { plaatsenMap[p.id] = p.naam; });
+
+    const bedrijven = [...new Set(alleMensen.map(m => m.bedrijf).filter(Boolean))].sort();
+    const bedrSelect = document.getElementById("bedrijf-keuze");
+    bedrSelect.innerHTML = `<option value="ALLE">Alle bedrijven (${alleMensen.length})</option>` +
+      bedrijven.map(b => `<option value="${b}">${b}</option>`).join("");
+
+    filterMedewerkers();
+  }
+
+  function filterMedewerkers() {
+    const gekozenBedrijf = document.getElementById("bedrijf-keuze").value;
+    const gefilterd = gekozenBedrijf === "ALLE"
+      ? alleMensen
+      : alleMensen.filter(m => m.bedrijf === gekozenBedrijf);
+
+    const mwSelect = document.getElementById("medewerker-keuze");
+    mwSelect.innerHTML = gefilterd.map(m => `<option value="${m.id}">${m.naam}</option>`).join("");
+    laadMaandstaat();
+  }
+
+  async function laadMaandstaat() {
+    const userId = document.getElementById("medewerker-keuze").value;
+    const maand = document.getElementById("maand-keuze").value;
+    if (!userId || !maand) return;
+
+    const persoon = alleMensen.find(m => m.id === userId) || {};
+    const [jaar, mnd] = maand.split("-").map(Number);
+    const aantalDagen = new Date(jaar, mnd, 0).getDate();
+
+    document.getElementById("rapport-naam").textContent = persoon.naam || "-";
+    document.getElementById("afdruktijd").textContent = new Date().toLocaleString("nl-BE", { dateStyle: "short", timeStyle: "short" });
+    document.getElementById("rapport-bedrijf").textContent = persoon.bedrijf ? "Bedrijf: " + persoon.bedrijf : "";
+    document.getElementById("rapport-periode").textContent =
+      "01/" + String(mnd).padStart(2,"0") + "/" + jaar + " - " + aantalDagen + "/" + String(mnd).padStart(2,"0") + "/" + jaar;
+
+    const startDatum = new Date(jaar, mnd - 1, 1).toISOString();
+    const eindDatum = new Date(jaar, mnd, 1).toISOString();
+
+    const { data: regels } = await db.from("registraties")
+      .select("id, tijd, type, plaats_id")
+      .eq("user_id", userId)
+      .gte("tijd", startDatum)
+      .lt("tijd", eindDatum)
+      .order("tijd", { ascending: true });
+
+    const perDag = {};
+    (regels || []).forEach(r => {
+      const dt = new Date(r.tijd);
+      const dagNr = dt.getDate();
+      if (!perDag[dagNr]) perDag[dagNr] = [];
+      perDag[dagNr].push({ ...r, dt });
+    });
+
+    const dagNamen = ["zo", "ma", "di", "wo", "do", "vr", "za"];
+    let html = "";
+    let totaalNettoMin = 0;
+    let totaalPauzeMin = 0;
+    let gewerkteDagen = 0;
+    huidigeExportData = []; huidigePerDag = perDag;
+
+    for (let d = 1; d <= aantalDagen; d++) {
+      const datumObj = new Date(jaar, mnd - 1, d);
+      const dagNaam = dagNamen[datumObj.getDay()];
+      const isWeekend = datumObj.getDay() === 0 || datumObj.getDay() === 6;
+      const dagLabel = dagNaam + " " + d + "/" + mnd;
+      const lijst = perDag[d];
+
+      if (!lijst || lijst.length === 0) {
+        html += `<tr class="${isWeekend ? 'weekend' : ''}"><td>${dagLabel}</td><td></td><td>--</td><td>--</td><td class="rechts">--</td><td class="rechts">--</td><td class="no-print" style="text-align:right;"><button class="sec" style="padding:2px 7px;font-size:11px;" onclick="openBewerkModal(${jaar},${mnd},${d})">✏️</button></td></tr>`;
+        huidigeExportData.push([dagLabel, "", "", "", "", ""]);
+        continue;
+      }
+
+      const starts = lijst.filter(x => x.type === "dag_start");
+      const eindes = lijst.filter(x => x.type === "dag_einde");
+      const eersteStart = starts.length > 0 ? starts[0].dt : null;
+      const laatsteEinde = eindes.length > 0 ? eindes[eindes.length - 1].dt : null;
+
+      const locaties = [...new Set(lijst.map(x => plaatsenMap[x.plaats_id]).filter(Boolean))].join(", ") || "-";
+      const inTijd = eersteStart ? eersteStart.toLocaleTimeString("nl-BE", {hour:"2-digit", minute:"2-digit"}) : "Vergeten";
+      const uitTijd = laatsteEinde ? laatsteEinde.toLocaleTimeString("nl-BE", {hour:"2-digit", minute:"2-digit"}) : "Bezig / vergeten";
+
+      let gekloktePauzeMin = 0;
+      let pauzeStart = null;
+      lijst.forEach(x => {
+        if (x.type === "pauze_start") pauzeStart = x.dt;
+        if (x.type === "pauze_einde" && pauzeStart) {
+          gekloktePauzeMin += (x.dt - pauzeStart) / 60000;
+          pauzeStart = null;
+        }
+      });
+
+      let pauzeTekst = "--";
+      let nettoTekst = "--";
+
+      if (eersteStart && laatsteEinde && laatsteEinde > eersteStart) {
+        const brutoMin = (laatsteEinde - eersteStart) / 60000;
+        let toegepastePauze = Math.round(gekloktePauzeMin);
+        let autoMelding = "";
+
+        if (brutoMin > 360 && toegepastePauze < 30) {
+          toegepastePauze = 30;
+          autoMelding = " (auto)";
+        }
+
+        const nettoMin = Math.max(0, Math.round(brutoMin) - toegepastePauze);
+        totaalNettoMin += nettoMin;
+        totaalPauzeMin += toegepastePauze;
+        gewerkteDagen++;
+
+        pauzeTekst = formatMinuten(toegepastePauze) + autoMelding;
+        nettoTekst = `<b>${formatMinuten(nettoMin)}</b>`;
+      }
+
+      html += `<tr><td>${dagLabel}</td><td>${locaties}</td><td>${inTijd}</td><td>${uitTijd}</td><td class="rechts">${pauzeTekst}</td><td class="rechts">${nettoTekst}</td><td class="no-print" style="text-align:right;"><button class="sec" style="padding:2px 7px;font-size:11px;" onclick="openBewerkModal(${jaar},${mnd},${d})">✏️</button></td></tr>`;
+      huidigeExportData.push([dagLabel, locaties, inTijd, uitTijd, pauzeTekst, nettoTekst.replace(/<[^>]*>/g, "")]);
+    }
+
+    document.getElementById("maand-tabel").innerHTML = html;
+    document.getElementById("tot-gewerkt").textContent = formatMinuten(totaalNettoMin);
+    document.getElementById("tot-pauze").textContent = formatMinuten(totaalPauzeMin);
+    document.getElementById("tot-dagen").textContent = gewerkteDagen;
+  }
+
+  function exporteerExcel() {
+  const naam = document.getElementById("rapport-naam").textContent;
+  const maand = document.getElementById("maand-keuze").value;
+  const totGewerkt = document.getElementById("tot-gewerkt").textContent;
+  const totPauze = document.getElementById("tot-pauze").textContent;
+  const totDagen = document.getElementById("tot-dagen").textContent;
+
+  const kop = ["Dag", "Locatie / Stal", "Inklokken", "Uitklokken", "Pauze", "Netto uren"];
+  const legeRij = ["", "", "", "", "", ""];
+  const totaalRij = ["TOTAAL", totDagen + " gewerkte dagen", "", "", totPauze, totGewerkt];
+
+  const rijen = [kop, ...huidigeExportData, legeRij, totaalRij];
+  const csv = "\uFEFF" + rijen.map(r => r.join(";")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "Uren_" + naam.replace(/\s+/g, "_") + "_" + maand + ".csv";
+  link.click();
+  }
+async function exporteerAllesExcel() {
+  const maand = document.getElementById("maand-keuze").value;
+  const gekozenBedrijf = document.getElementById("bedrijf-keuze").value;
+  if (!maand) return;
+
+  const gefilterd = gekozenBedrijf === "ALLE"
+    ? alleMensen
+    : alleMensen.filter(m => m.bedrijf === gekozenBedrijf);
+
+  if (gefilterd.length === 0) return;
+
+  const [jaar, mnd] = maand.split("-").map(Number);
+  const aantalDagen = new Date(jaar, mnd, 0).getDate();
+  const startDatum = new Date(jaar, mnd - 1, 1).toISOString();
+  const eindDatum = new Date(jaar, mnd, 1).toISOString();
+
+  const { data: alleRegels } = await db.from("registraties")
+    .select("user_id, tijd, type, plaats_id")
+    .gte("tijd", startDatum)
+    .lt("tijd", eindDatum)
+    .order("tijd", { ascending: true });
+
+  const dagNamen = ["zo", "ma", "di", "wo", "do", "vr", "za"];
+  const werkboek = XLSX.utils.book_new();
+  const gebruikteTabNamen = new Set();
+
+  for (const persoon of gefilterd) {
+    const mijnRegels = (alleRegels || []).filter(r => r.user_id === persoon.id);
+    const perDag = {};
+    mijnRegels.forEach(r => {
+      const dt = new Date(r.tijd);
+      const dagNr = dt.getDate();
+      if (!perDag[dagNr]) perDag[dagNr] = [];
+      perDag[dagNr].push({ ...r, dt });
+    });
+
+    const rijen = [
+      ["Medewerker:", persoon.naam, "", "Bedrijf:", persoon.bedrijf || "-"],
+      [],
+      ["Dag", "Locatie / Stal", "Inklokken", "Uitklokken", "Pauze", "Netto uren"]
+    ];
+
+    let totaalNettoMin = 0;
+    let totaalPauzeMin = 0;
+    let gewerkteDagen = 0;
+
+    for (let d = 1; d <= aantalDagen; d++) {
+      const datumObj = new Date(jaar, mnd - 1, d);
+      const dagLabel = dagNamen[datumObj.getDay()] + " " + d + "/" + mnd;
+      const lijst = perDag[d];
+
+      if (!lijst || lijst.length === 0) {
+        rijen.push([dagLabel, "", "", "", "", ""]);
+        continue;
+      }
+
+      const starts = lijst.filter(x => x.type === "dag_start");
+      const eindes = lijst.filter(x => x.type === "dag_einde");
+      const eersteStart = starts.length > 0 ? starts[0].dt : null;
+      const laatsteEinde = eindes.length > 0 ? eindes[eindes.length - 1].dt : null;
+      const locaties = [...new Set(lijst.map(x => plaatsenMap[x.plaats_id]).filter(Boolean))].join(", ") || "-";
+      const inTijd = eersteStart ? eersteStart.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" }) : "Vergeten";
+      const uitTijd = laatsteEinde ? laatsteEinde.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" }) : "Bezig / vergeten";
+
+      let gekloktePauzeMin = 0;
+      let pauzeStart = null;
+      lijst.forEach(x => {
+        if (x.type === "pauze_start") pauzeStart = x.dt;
+        if (x.type === "pauze_einde" && pauzeStart) {
+          gekloktePauzeMin += (x.dt - pauzeStart) / 60000;
+          pauzeStart = null;
+        }
+      });
+
+      let pauzeTekst = "";
+      let nettoTekst = "";
+
+      if (eersteStart && laatsteEinde && laatsteEinde > eersteStart) {
+        const brutoMin = (laatsteEinde - eersteStart) / 60000;
+        let toegepastePauze = Math.round(gekloktePauzeMin);
+        let autoMelding = "";
+        if (brutoMin > 360 && toegepastePauze < 30) {
+          toegepastePauze = 30;
+          autoMelding = " (auto)";
+        }
+        const nettoMin = Math.max(0, Math.round(brutoMin) - toegepastePauze);
+        totaalNettoMin += nettoMin;
+        totaalPauzeMin += toegepastePauze;
+        gewerkteDagen++;
+        pauzeTekst = formatMinuten(toegepastePauze) + autoMelding;
+        nettoTekst = formatMinuten(nettoMin);
+      }
+
+      rijen.push([dagLabel, locaties, inTijd, uitTijd, pauzeTekst, nettoTekst]);
+    }
+
+    rijen.push([]);
+    rijen.push(["TOTAAL", gewerkteDagen + " gewerkte dagen", "", "", formatMinuten(totaalPauzeMin), formatMinuten(totaalNettoMin)]);
+
+    const werkblad = XLSX.utils.aoa_to_sheet(rijen);
+    werkblad["!cols"] = [{ wch: 12 }, { wch: 24 }, { wch: 12 }, { wch: 16 }, { wch: 15 }, { wch: 12 }];
+
+    let basisNaam = (persoon.naam || "Medewerker").replace(/[\\/?*[\]:]/g, "").slice(0, 28);
+    let tabNaam = basisNaam;
+    let teller = 2;
+    while (gebruikteTabNamen.has(tabNaam)) {
+      tabNaam = basisNaam.slice(0, 25) + " (" + teller + ")";
+      teller++;
+    }
+    gebruikteTabNamen.add(tabNaam);
+
+    XLSX.utils.book_append_sheet(werkboek, werkblad, tabNaam);
+  }
+
+  const label = gekozenBedrijf === "ALLE" ? "Alle_Bedrijven" : gekozenBedrijf.replace(/\s+/g, "_");
+  XLSX.writeFile(werkboek, "Uren_" + label + "_" + maand + ".xlsx");
+}
+async function printAlles() {
+  const maand = document.getElementById("maand-keuze").value;
+  const gekozenBedrijf = document.getElementById("bedrijf-keuze").value;
+  if (!maand) return;
+
+  const gefilterd = gekozenBedrijf === "ALLE"
+    ? alleMensen
+    : alleMensen.filter(m => m.bedrijf === gekozenBedrijf);
+
+  if (gefilterd.length === 0) return;
+
+  const [jaar, mnd] = maand.split("-").map(Number);
+  const aantalDagen = new Date(jaar, mnd, 0).getDate();
+  const startDatum = new Date(jaar, mnd - 1, 1).toISOString();
+  const eindDatum = new Date(jaar, mnd, 1).toISOString();
+
+  const { data: alleRegels } = await db.from("registraties")
+    .select("user_id, tijd, type, plaats_id")
+    .gte("tijd", startDatum)
+    .lt("tijd", eindDatum)
+    .order("tijd", { ascending: true });
+
+  const dagNamen = ["zo", "ma", "di", "wo", "do", "vr", "za"];
+  const afdrukTijd = document.getElementById("afdruktijd").textContent;
+  const periodeTekst = "01/" + String(mnd).padStart(2, "0") + "/" + jaar + " - " + aantalDagen + "/" + String(mnd).padStart(2, "0") + "/" + jaar;
+  const container = document.getElementById("bulk-print-vak");
+  container.innerHTML = "";
+
+  for (const persoon of gefilterd) {
+    const mijnRegels = (alleRegels || []).filter(r => r.user_id === persoon.id);
+    const perDag = {};
+    mijnRegels.forEach(r => {
+      const dt = new Date(r.tijd);
+      const dagNr = dt.getDate();
+      if (!perDag[dagNr]) perDag[dagNr] = [];
+      perDag[dagNr].push({ ...r, dt });
+    });
+
+    let totaalNettoMin = 0;
+    let totaalPauzeMin = 0;
+    let gewerkteDagen = 0;
+    let rijenHtml = "";
+
+    for (let d = 1; d <= aantalDagen; d++) {
+      const datumObj = new Date(jaar, mnd - 1, d);
+      const isWeekend = datumObj.getDay() === 0 || datumObj.getDay() === 6;
+      const dagLabel = dagNamen[datumObj.getDay()] + " " + d + "/" + mnd;
+      const lijst = perDag[d];
+
+      if (!lijst || lijst.length === 0) {
+        rijenHtml += `<tr class="${isWeekend ? "weekend" : ""}"><td>${dagLabel}</td><td></td><td></td><td></td><td class="rechts"></td><td class="rechts"></td></tr>`;
+        continue;
+      }
+
+      const starts = lijst.filter(x => x.type === "dag_start");
+      const eindes = lijst.filter(x => x.type === "dag_einde");
+      const eersteStart = starts.length > 0 ? starts[0].dt : null;
+      const laatsteEinde = eindes.length > 0 ? eindes[eindes.length - 1].dt : null;
+      const locaties = [...new Set(lijst.map(x => plaatsenMap[x.plaats_id]).filter(Boolean))].join(", ") || "-";
+      const inTijd = eersteStart ? eersteStart.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" }) : "Vergeten";
+      const uitTijd = laatsteEinde ? laatsteEinde.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" }) : "Bezig / vergeten";
+
+      let gekloktePauzeMin = 0;
+      let pauzeStart = null;
+      lijst.forEach(x => {
+        if (x.type === "pauze_start") pauzeStart = x.dt;
+        if (x.type === "pauze_einde" && pauzeStart) {
+          gekloktePauzeMin += (x.dt - pauzeStart) / 60000;
+          pauzeStart = null;
+        }
+      });
+
+      let pauzeTekst = "-";
+      let nettoTekst = "-";
+
+      if (eersteStart && laatsteEinde && laatsteEinde > eersteStart) {
+        const brutoMin = (laatsteEinde - eersteStart) / 60000;
+        let toegepastePauze = Math.round(gekloktePauzeMin);
+        let autoMelding = "";
+        if (brutoMin > 360 && toegepastePauze < 30) {
+          toegepastePauze = 30;
+          autoMelding = " (auto)";
+        }
+        const nettoMin = Math.max(0, Math.round(brutoMin) - toegepastePauze);
+        totaalNettoMin += nettoMin;
+        totaalPauzeMin += toegepastePauze;
+        gewerkteDagen++;
+        pauzeTekst = formatMinuten(toegepastePauze) + autoMelding;
+        nettoTekst = `<b>${formatMinuten(nettoMin)}</b>`;
+      }
+
+      rijenHtml += `<tr class="${isWeekend ? "weekend" : ""}">
+        <td>${dagLabel}</td><td>${locaties}</td><td>${inTijd}</td><td>${uitTijd}</td><td class="rechts">${pauzeTekst}</td><td class="rechts">${nettoTekst}</td>
+      </tr>`;
+    }
+
+    container.innerHTML += `
+      <div class="pagina-einde">
+        <div style="position:relative; display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; font-size:11px; color:#555;">
+          <span>${afdrukTijd}</span>
+          <img src="logo.png" alt="Logo" style="position:absolute; left:50%; top:0px; transform:translateX(-50%); height:80px; z-index:-1; pointer-events:none;">
+          <span>Maandoverzicht Uren</span>
+        </div>
+        <div class="kop" style="display:flex; justify-content:space-between; align-items:flex-end;">
+          <div>
+            <h2 style="margin:0;">${persoon.naam}</h2>
+            <div style="font-size:12px; color:#555;">Bedrijf: <b>${persoon.bedrijf || "-"}</b></div>
+          </div>
+          <div style="font-size:12px; color:#555;">Periode: <b>${periodeTekst}</b></div>
+        </div>
+        <div class="badges">
+          <div class="stat s-blauw"><b>${formatMinuten(totaalNettoMin)}</b>Totale gewerkte uren</div>
+          <div class="stat s-groen"><b>${formatMinuten(totaalPauzeMin)}</b>Totale pauze</div>
+          <div class="stat s-grijs"><b>${gewerkteDagen}</b>Gewerkte dagen</div>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Dag</th><th>Locatie / Stal</th><th>Inklokken</th><th>Uitklokken</th><th class="rechts">Pauze</th><th class="rechts">Netto uren</th></tr>
+          </thead>
+          <tbody>${rijenHtml}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  document.body.classList.add("bulk-print");
+  setTimeout(() => {
+    window.print();
+    document.body.classList.remove("bulk-print");
+    container.innerHTML = "";
+  }, 200);
+}
+function openBewerkModal(jaar, mnd, dag) {
+  const userId = document.getElementById("medewerker-keuze").value;
+  const naam = document.getElementById("rapport-naam").textContent;
+  bewerkDatumInfo = { userId, jaar, mnd, dag };
+
+  document.getElementById("bewerk-titel").textContent = `${naam} — ${dag}/${mnd}/${jaar}`;
+
+  const plaatsOpties = '<option value="">- Geen stal -</option>' +
+    Object.entries(plaatsenMap).map(([id, pNaam]) => `<option value="${id}">${pNaam}</option>`).join("");
+  document.getElementById("nieuw-plaats").innerHTML = plaatsOpties;
+  document.getElementById("nieuw-tijd").value = "";
+
+  const lijst = huidigePerDag[dag] || [];
+  const container = document.getElementById("bewerk-bestaand");
+
+  if (lijst.length === 0) {
+    container.innerHTML = '<div style="color:#666;font-size:13px;">Nog geen registraties op deze dag.</div>';
+  } else {
+    container.innerHTML = lijst.map(r => {
+      const hh = String(r.dt.getHours()).padStart(2, "0");
+      const mm = String(r.dt.getMinutes()).padStart(2, "0");
+      const pOpt = '<option value="">- Geen stal -</option>' +
+        Object.entries(plaatsenMap).map(([id, pNaam]) => `<option value="${id}" ${r.plaats_id === id ? "selected" : ""}>${pNaam}</option>`).join("");
+      return `
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+          <select id="type-${r.id}" style="padding:5px;">
+            <option value="dag_start" ${r.type === "dag_start" ? "selected" : ""}>Dag starten</option>
+            <option value="pauze_start" ${r.type === "pauze_start" ? "selected" : ""}>Pauze starten</option>
+            <option value="pauze_einde" ${r.type === "pauze_einde" ? "selected" : ""}>Pauze beëindigen</option>
+            <option value="dag_einde" ${r.type === "dag_einde" ? "selected" : ""}>Dag beëindigen</option>
+          </select>
+          <input id="tijd-${r.id}" type="time" value="${hh}:${mm}" style="padding:5px;">
+          <select id="plaats-${r.id}" style="padding:5px;">${pOpt}</select>
+          <button onclick="wijzigRegistratie('${r.id}')" style="padding:5px 9px;">Opslaan</button>
+          <button class="out" onclick="verwijderRegistratie('${r.id}')" style="padding:5px 9px;">🗑️</button>
+        </div>`;
+    }).join("");
+  }
+
+  const modal = document.getElementById("bewerk-modal");
+  modal.classList.remove("verborgen");
+  modal.style.display = "flex";
+}
+
+function sluitBewerkModal() {
+  const modal = document.getElementById("bewerk-modal");
+  modal.classList.add("verborgen");
+  modal.style.display = "none";
+}
+
+function bouwIsoTijd(jaar, mnd, dag, tijdStr) {
+  const [uur, min] = tijdStr.split(":").map(Number);
+  return new Date(jaar, mnd - 1, dag, uur, min, 0).toISOString();
+}
+
+async function wijzigRegistratie(regId) {
+  const type = document.getElementById("type-" + regId).value;
+  const tijdStr = document.getElementById("tijd-" + regId).value;
+  const plaatsVal = document.getElementById("plaats-" + regId).value || null;
+  if (!tijdStr) return alert("Vul een geldig tijdstip in.");
+
+  const { jaar, mnd, dag } = bewerkDatumInfo;
+  const isoTijd = bouwIsoTijd(jaar, mnd, dag, tijdStr);
+
+  const { data, error } = await db.rpc("admin_beheer_registratie", {
+    p_actie: "wijzigen",
+    p_reg_id: regId,
+    p_type: type,
+    p_tijd: isoTijd,
+    p_plaats_id: plaatsVal
+  });
+
+  if (error || !data?.ok) return alert("Opslaan mislukt: " + (data?.fout || error?.message));
+  await laadMaandstaat();
+  openBewerkModal(jaar, mnd, dag);
+}
+
+async function verwijderRegistratie(regId) {
+  if (!confirm("Deze registratie definitief verwijderen?")) return;
+  const { jaar, mnd, dag } = bewerkDatumInfo;
+
+  const { data, error } = await db.rpc("admin_beheer_registratie", {
+    p_actie: "verwijderen",
+    p_reg_id: regId
+  });
+
+  if (error || !data?.ok) return alert("Verwijderen mislukt: " + (data?.fout || error?.message));
+  await laadMaandstaat();
+  openBewerkModal(jaar, mnd, dag);
+}
+
+async function voegRegistratieToe() {
+  const type = document.getElementById("nieuw-type").value;
+  const tijdStr = document.getElementById("nieuw-tijd").value;
+  const plaatsVal = document.getElementById("nieuw-plaats").value || null;
+  if (!tijdStr) return alert("Kies eerst een tijdstip.");
+
+  const { userId, jaar, mnd, dag } = bewerkDatumInfo;
+  const isoTijd = bouwIsoTijd(jaar, mnd, dag, tijdStr);
+
+  const { data, error } = await db.rpc("admin_beheer_registratie", {
+    p_actie: "toevoegen",
+    p_user_id: userId,
+    p_type: type,
+    p_tijd: isoTijd,
+    p_plaats_id: plaatsVal
+  });
+
+  if (error || !data?.ok) return alert("Toevoegen mislukt: " + (data?.fout || error?.message));
+  await laadMaandstaat();
+  openBewerkModal(jaar, mnd, dag);
+}
+
+  async function uitloggen() {
+    await db.auth.signOut();
+    location.reload();
+  }
+  startApp();
+</script>
+</body>
+</html>

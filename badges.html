@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="nl"><head><meta charset="utf-8"><title>Badges afdrukken</title>
+<style>
+body{font:8px system-ui,sans-serif;margin:10mm}.g{display:grid;grid-template-columns:repeat(auto-fill,27mm);gap:2mm}
+.c{width:27mm;height:41mm;box-sizing:border-box;border:1px solid #999;border-radius:2mm;padding:1mm;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.5mm;break-inside:avoid;overflow:hidden}.c *{margin:0;padding:0}.c br{display:none}.c img{display:block;height:11mm;width:auto;object-fit:contain}.c svg{display:block;margin:0 auto;width:24mm;height:24mm}
+.no { font-size: 14px; margin-bottom: 12px; }
+.no h2 { font-size: 18px; margin: 0 0 8px 0; }
+.no input, .no select, .no button { font-size: 14px; padding: 8px 12px; margin: 4px 4px 4px 0; }
+.no button { cursor: pointer; }
+.c { cursor: pointer; }
+.c.uit { opacity: 0.25; }
+@media print{body>:not(.g){display:none!important}}
+</style></head><body>
+<div class="no">
+  <h2>Badges afdrukken (enkel voor administratie)</h2>
+  <input id="em" type="email" placeholder="E-mail">
+  <input id="pw" type="password" placeholder="Wachtwoord">
+  <button onclick="go()">Aanmelden en tonen</button>
+  <select id="filter-naam" onchange="filterBadges()" style="display:none;">
+    <option value="ALLE">Alle medewerkers</option>
+  </select>
+  <button onclick="print()">Afdrukken</button>
+  <span id="tip" style="display:none; margin-left:8px; color:#555;">(Tip: klik op een badge om deze wel/niet mee te printen)</span>
+  <div id="m" style="color:red; margin-top:4px;"></div>
+</div>
+<div class="g" id="g"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>
+const SUPABASE_URL="https://aalyfgtulrlmpkegkzub.supabase.co", SUPABASE_KEY="sb_publishable_bkZUQu-mzukYkvwfQHzPhw_Z9I84E0c";
+const db=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function go(){const a=await db.auth.signInWithPassword({email:em.value,password:pw.value});if(a.error)return m.textContent=a.error.message;
+ const{data,error}=await db.rpc("badge_lijst");if(error)return m.textContent="Geen toegang (enkel admin): "+error.message;m.textContent="";
+   const sel = document.getElementById("filter-naam");
+  sel.innerHTML = '<option value="ALLE">Alle medewerkers (' + data.length + ')</option>' +
+    data.map((r, i) => `<option value="${i}">${esc(r.naam)}</option>`).join("");
+  sel.style.display = "inline-block";
+  document.getElementById("tip").style.display = "inline";
+
+  g.innerHTML = data.map((r, i) => {
+    const q = qrcode(0, "L");
+    q.addData(r.badge_code);
+    q.make();
+    return `<div class="c" data-idx="${i}" onclick="this.classList.toggle('uit')"><img src="logo.png" alt="" style="height:8.5mm"><br><b>${esc(r.naam)}</b><br>${q.createSvgTag(4, 2)}</div>`;
+  }).join("");
+}
+
+function filterBadges() {
+  const gekozen = document.getElementById("filter-naam").value;
+  document.querySelectorAll("#g .c").forEach(kaart => {
+    if (gekozen === "ALLE" || kaart.dataset.idx === gekozen) {
+      kaart.classList.remove("uit");
+      kaart.style.display = "flex";
+    } else {
+      kaart.style.display = "none";
+    }
+  });
+}
+</script></body></html>
