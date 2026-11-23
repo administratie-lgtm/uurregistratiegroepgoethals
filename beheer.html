@@ -66,7 +66,7 @@ function render(){const mij=mensen.find(m=>m.id===me.id);
  <div><label>Manager</label><select onchange="upd('${m.id}','manager_id',this.value)">${opt(M.filter(x=>x[0]!==m.id),m.manager_id,"— geen —")}</select></div>
  <div><label>Bedrijf</label><input value="${esc(m.bedrijf||'')}" onchange="upd('${m.id}','bedrijf',this.value)"></div></div>
  <button class="s" onclick="hernoem('${m.id}')">Naam wijzigen</button><button class="s" onclick="pin('${m.id}')">Pincode</button><button class="s" onclick="badge('${m.id}')">Nieuwe badge</button>
- ${gl?`<button class="s" onclick="mailToevoegen('${m.id}')">E-mail toevoegen</button>`:`<button class="s" onclick="mailOpnieuw('${m.id}')">Wachtwoordmail opnieuw</button><button class="s" onclick="link('${m.id}')">Link kopiëren</button>`}
+ ${gl?`<button class="s" onclick="mailToevoegen('${m.id}')">E-mail toevoegen</button>`:`<button class="s" onclick="mailToevoegen('${m.id}')">E-mail wijzigen</button><button class="s" onclick="mailOpnieuw('${m.id}')">Wachtwoordmail opnieuw</button><button class="s" onclick="link('${m.id}')">Link kopiëren</button>`}
  ${zelf?"":m.badge_actief?`<button class="s d" onclick="actief('${m.id}',false)">Uitschakelen</button>`:`<button class="s" onclick="actief('${m.id}',true)">Inschakelen</button>`}</div>`}).join("")}
  <button class="s" onclick="db.auth.signOut().then(login)">Afmelden</button>`}
 init();
