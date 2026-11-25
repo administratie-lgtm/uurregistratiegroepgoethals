@@ -38,36 +38,65 @@ const hm=d=>new Date(d).toLocaleTimeString("nl-BE",{hour:"2-digit",minute:"2-dig
 async function init(){const{data:{session}}=await db.auth.getSession();if(!session)return login();me=session.user;await load();render()}
 function login(){$("app").innerHTML=`<div class="card"><h2>Aanmelden</h2><input id="em" type="email" placeholder="E-mail"><input id="pw" type="password" placeholder="Wachtwoord"><button onclick="inlog()">Aanmelden</button><div id="lm"></div></div>`}
 async function inlog(){const{error}=await db.auth.signInWithPassword({email:$("em").value,password:$("pw").value});if(error)$("lm").innerHTML=`<div class="msg bad">${esc(error.message)}</div>`;else init()}
-async function load(){const d0=new Date();d0.setHours(0,0,0,0);
- const[p,r,q]=await Promise.all([db.from("plaatsen").select("*").eq("actief",true).order("naam"),db.from("registraties").select("*").eq("user_id",me.id).gte("tijd",d0.toISOString()).order("tijd"),db.from("profiles").select("id,naam,rol,manager_id,standaard_plaats_id,verlofsaldo").eq("id",me.id).single()]);
- plaatsen=p.data||[];regs=r.data||[];prof=q.data;sel=sel||(plaatsen.find(x=>x.type==="werf")||{}).id}
-function state(){let day=null,w=null,p=null,werven=[],paus=[];
+async function load(){  const d0 = new Date(); d0.setHours(0, 0, 0, 0); const gisteren = new Date(d0.getTime() - 24 * 60 * 60 * 1000);
+  const [p, r, q] = await Promise.all([
+    db.from("plaatsen").select("*").eq("actief", true).order("naam"),
+    db.from("registraties").select("*").eq("user_id", me.id).gte("tijd", gisteren.toISOString()).order("tijd"),
+    db.from("profiles").select("id,naam,rol,manager_id,standaard_plaats_id,verlofsaldo").eq("id", me.id).single()
+  ]);
+
+  plaatsen = p.data || [];
+  prof = q.data;
+
+  // Filter: toon alles van vandaag, én als er gisteren nog een dienst liep tot na middernacht, neem die hele dienst mee
+  const alles = r.data || [];
+  let startIdx = alles.findIndex(x => new Date(x.tijd) >= d0);
+  if (startIdx === -1) startIdx = alles.length;
+
+  for (let i = startIdx - 1; i >= 0; i--) {
+    if (alles[i].type === "dag_start") {
+      const heeftEindeVoorMiddernacht = alles.slice(i + 1, startIdx).some(x => x.type === "dag_einde");
+      if (!heeftEindeVoorMiddernacht) startIdx = i;
+      break;
+    }
+  }
+
+  regs = alles.slice(startIdx);
+  sel = sel || (plaatsen.find(x => x.type === "werf") || {}).id;
+}
+
+function state(){let day=null,done=0,w=null,p=null,werven=[],paus=[];
  for(const r of regs){const t=new Date(r.tijd).getTime()/60000;
-  if(r.type==="dag_start")day={s:t,e:null};else if(r.type==="dag_einde"&&day)day.e=t;
+  if(r.type==="dag_start"){if(day&&day.e!==null)done+=day.e-day.s;day={s:t,e:null}}else if(r.type==="dag_einde"&&day)day.e=t;
   else if(r.type==="werf_aan")w={id:r.plaats_id,s:t};else if(r.type==="werf_af"&&w){werven.push({s:w.s,e:t});w=null}
   else if(r.type==="pauze_start")p={s:t};else if(r.type==="pauze_einde"&&p){paus.push({s:p.s,e:t});p=null}}
- return{day,w,p,werven,paus}}
+ return{day,done,w,p,werven,paus}}
 function calc(st){const n=Date.now()/60000;if(!st.day)return{net:0,wk:0,rij:0,bump:0,pz:0};
- const tot=(st.day.e??n)-st.day.s,ps=st.paus.concat(st.p?[{s:st.p.s,e:n}]:[]),pz=ps.reduce((a,x)=>a+x.e-x.s,0);
+ const tot=(st.day.e??n)-st.day.s+st.done,ps=st.paus.concat(st.p?[{s:st.p.s,e:n}]:[]),pz=ps.reduce((a,x)=>a+x.e-x.s,0);
  const ov=(a,b,c,d)=>Math.max(0,Math.min(b,d)-Math.max(a,c));
  const wk=st.werven.concat(st.w?[{s:st.w.s,e:n}]:[]).reduce((a,x)=>a+x.e-x.s-ps.reduce((b,p)=>b+ov(x.s,x.e,p.s,p.e),0),0);
  const bump=tot>360?Math.max(0,30-pz):0, net=Math.max(0,tot-pz-bump); // minimum 30 min pauze bij > 6u
  return{net,wk,rij:Math.max(0,net-wk),bump,pz}}
 const pos=()=>new Promise((ok,no)=>navigator.geolocation?navigator.geolocation.getCurrentPosition(ok,()=>no(new Error("Locatie is verplicht. Sta locatietoegang toe in je instellingen.")),{enableHighAccuracy:true,timeout:15000,maximumAge:0}):no(new Error("Geolocatie niet beschikbaar op dit toestel.")));
 async function adres(lat,lng){try{const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&accept-language=nl&lat=${lat}&lon=${lng}`);return(await r.json()).display_name||null}catch{return null}}
+const afst=(a,b,c,d)=>{const r=Math.PI/180,x=(c-a)*r,y=(d-b)*r,h=Math.sin(x/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin(y/2)**2;return 12742000*Math.asin(Math.sqrt(h))};
+function besteStart(c){let b=null,bd=1e12;for(const p of plaatsen){if(p.type==="werf")continue;const d=afst(c.latitude,c.longitude,p.lat,p.lng);if(d-Math.min(c.accuracy||0,100)<=p.straal_m&&d<bd){b=p;bd=d}}return b}
 async function klok(type,plaats){msg={c:"warn",t:"Locatie bepalen…"};render();
- try{const{coords:c}=await pos(),a=await adres(c.latitude,c.longitude);
-  const{error}=await db.from("registraties").insert({user_id:me.id,type,plaats_id:plaats||null,lat:c.latitude,lng:c.longitude,nauwkeurigheid:Math.round(c.accuracy),adres:a});
-  if(error)throw new Error(error.message);msg={c:"ok",t:"Geregistreerd om "+hm(Date.now())+(a?" – "+a:"")}}
+ try{const{coords:c}=await pos();let pl=plaats;
+  if(plaats==="auto"){const b=besteStart(c);if(!b)throw new Error("Je staat niet bij een stal of de startlocatie in Eeklo. Klokken is hier niet mogelijk.");pl=b.id}
+  const a=await adres(c.latitude,c.longitude);
+  const{error}=await db.from("registraties").insert({user_id:me.id,type,plaats_id:pl||null,lat:c.latitude,lng:c.longitude,nauwkeurigheid:Math.round(c.accuracy),adres:a});
+  if(error)throw new Error(error.message);msg={c:"ok",t:"Geregistreerd om "+hm(Date.now())+(pl&&plaatsen.find(x=>x.id===pl)?" – "+plaatsen.find(x=>x.id===pl).naam:"")+(a?" · "+a:"")}}
  catch(e){msg={c:"bad",t:e.message}}await load();render()}
 const btn=(t,a,c="")=>`<button class="${c}" onclick="${a}">${t}</button>`;
-function render(){const st=state(),c=calc(st),start=(prof&&plaatsen.find(x=>x.id===prof.standaard_plaats_id))||plaatsen.find(x=>x.type!=="werf"),werven=plaatsen.filter(x=>x.type==="werf"),pn=id=>(plaatsen.find(x=>x.id===id)||{}).naam;
+function render(){const st=state(),c=calc(st),start=prof&&plaatsen.find(x=>x.id===prof.standaard_plaats_id),werven=plaatsen.filter(x=>x.type==="werf"),pn=id=>(plaatsen.find(x=>x.id===id)||{}).naam;
  const ended=st.day&&st.day.e!==null;let b="";
- if(!st.day)b=btn(`Dag starten (${esc(start?.naam)})`,`klok('dag_start','${start?.id}')`);
+ if(!st.day)b=btn("Dag starten","klok('dag_start','auto')");
  else if(!ended){if(st.p)b=btn("Pauze beëindigen","klok('pauze_einde')");
   else{b=st.w?btn("Vertrek van werf – uitklokken",`klok('werf_af','${st.w.id}')`,"out")
-   :(start?.type==="stal"?"":`<label class="mu">Naar welke werf?</label><select onchange="sel=this.value">${werven.map(w=>`<option value="${w.id}" ${w.id===sel?"selected":""}>${esc(w.naam)}</option>`).join("")}</select>`+btn("Aankomst op werf – inklokken","klok('werf_aan',sel)"))+btn(`Dag beëindigen (${esc(start?.naam)})`,`klok('dag_einde','${start?.id}')`,"out");
+   :(start?.type==="stal"?"":`<label class="mu">Naar welke werf?</label><select onchange="sel=this.value">${werven.map(w=>`<option value="${w.id}" ${w.id===sel?"selected":""}>${esc(w.naam)}</option>`).join("")}</select>`+btn("Aankomst op werf – inklokken","klok('werf_aan',sel)"))+btn("Dag beëindigen","klok('dag_einde','auto')","out");
    b+=btn("Pauze starten","klok('pauze_start')","sec")}}
+ else b=btn("Opnieuw starten (nieuwe dienst)","klok('dag_start','auto')");
  const s=!st.day?"Dag nog niet gestart":ended?"Werkdag afgesloten":st.p?"Pauze bezig":st.w?"Op werf: "+esc(pn(st.w.id)):"Onderweg / in Eeklo";
  $("app").innerHTML=`<div class="card"><div class="mu">${s}</div><div class="big">${dur(c.net)}</div><div class="mu">netto vandaag · op werven ${dur(c.wk)} · rijtijd/overig ${dur(c.rij)}</div>${b}
  ${msg?`<div class="msg ${msg.c}">${esc(msg.t)}</div>`:""}${c.bump?`<div class="msg warn">Pauze aangevuld tot 30 min (minimum bij meer dan 6 uur werk).</div>`:""}</div>
