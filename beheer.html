@@ -29,7 +29,7 @@ const opt=(arr,sel,leeg)=>(leeg?`<option value="">${leeg}</option>`:"")+arr.map(
 async function init(){const{data:{session}}=await db.auth.getSession();if(!session)return login();me=session.user;await load();render()}
 function login(){$("app").innerHTML=`<div class="card"><h3>Aanmelden als admin</h3><label>E-mail</label><input id="em" type="email"><label>Wachtwoord</label><input id="pw" type="password"><button onclick="inlog()">Aanmelden</button><div id="lm"></div></div>`}
 async function inlog(){const{error}=await db.auth.signInWithPassword({email:$("em").value,password:$("pw").value});if(error)$("lm").innerHTML=`<div class="msg bad">${esc(error.message)}</div>`;else init()}
-async function load(){const[a,b,c]=await Promise.all([db.from("profiles").select("id,naam,email,rol,manager_id,standaard_plaats_id,badge_actief,bedrijf,rooster,verlofsaldo").order("naam"),db.from("plaatsen").select("id,naam,type").in("type",["start","stal"]).order("naam"),db.from("kiosken").select("*").order("created_at",{ascending:false})]);mensen=a.data||[];plaatsen=b.data||[];kiosken=c.data||[]}
+async function load(){const[a,b,c]=await Promise.all([db.from("profiles").select("id,naam,email,rol,manager_id,standaard_plaats_id,badge_actief,bedrijf,rooster,verlofsaldo").order("naam"),db.from("plaatsen").select("id,naam,type").in("type",["start","stal"]).order("naam"),db.from("kiosken").select("*").eq("actief",true).order("created_at",{ascending:false})]);mensen=a.data||[];plaatsen=b.data||[];kiosken=c.data||[]}
 async function fn(body){const{data,error}=await db.functions.invoke("beheer-medewerkers",{body});
  if(error){let t=error.message;try{t=(await error.context.json()).fout||t}catch{}return{fout:t}}return data}
 async function klaar(r,ok){msg=r&&r.fout?{c:"bad",t:r.fout}:{c:"ok",t:ok};await load();render()}
@@ -77,7 +77,7 @@ function render(){const mij=mensen.find(m=>m.id===me.id);
       const pl = (plaatsen.find(p => p.id === k.plaats_id) || {}).naam || "Onbekende locatie";
       return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid #eee">
         <div><b>${esc(k.naam)}</b> <span style="color:#666;font-size:13px">(${esc(pl)})</span></div>
-        <button class="s" style="background:${k.actief ? '#3a3340' : '#2f7d4f'};color:#fff" onclick="toggleKiosk('${k.id}', ${!k.actief})">${k.actief ? 'Uitschakelen' : 'Activeren'}</button>
+        <button class="s" style="background:#b02a37;color:#fff" onclick="verwijderKiosk('${k.id}','${esc(k.naam)}')">Verwijderen</button>
       </div>`;
     }).join("") || '<div style="color:#666;font-size:13px">Nog geen tablets aangemaakt.</div>'}
   </div>
@@ -134,7 +134,7 @@ async function nieuweKiosk() {
   const { data, error } = await db.from("kiosken").insert({ naam, plaats_id, secret_hash, actief: true }).select().single();
   if (error) return alert("Kon tablet niet aanmaken: " + error.message);
 
-   const basis = location.protocol.startsWith("http") ? location.href.replace(/beheer\.html.*$/, "") : "https://" + "administratie-lgtm.github.io/uurregistratiegroepgoethals/";
+  const basis = location.protocol.startsWith("http") ? location.href.replace(/[^/]*$/, "") : "https://" + "administratie-lgtm.github.io/uurregistratiegroepgoethals/";
   const koppelUrl = `${basis}kiosk.html#setup=${data.id}:${secret}`;
   await db.from("kiosken").update({ koppel_url: koppelUrl }).eq("id", data.id);
   await navigator.clipboard?.writeText(koppelUrl).catch(() => {});
@@ -146,8 +146,13 @@ async function nieuweKiosk() {
   </div>`;
 }
 
-async function toggleKiosk(id, actief) {
-  await db.from("kiosken").update({ actief }).eq("id", id);
+async function verwijderKiosk(id, naam) {
+  if (!confirm(`Weet je zeker dat je "${naam}" wilt verwijderen?`)) return;
+  const { error } = await db.from("kiosken").delete().eq("id", id);
+  if (error) {
+    // Heeft al klokregistraties: zet hem definitief uit zodat hij niet meer werkt én uit de lijst verdwijnt
+    await db.from("kiosken").update({ actief: false }).eq("id", id);
+  }
   await load(); render();
 }
 init();
