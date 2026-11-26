@@ -167,12 +167,10 @@ async function verwijderKiosk(id, naam) {
 function toonKioskQr(id, url) {
   const vak = $("qr_" + id);
   if (vak.style.display === "block") { vak.style.display = "none"; return; }
-  const qr = qrcode(0, "M");
-  qr.addData(url);
-  qr.make();
-  vak.innerHTML = qr.createSvgTag({ scalable: true, margin: 2 })
-    .replace("<svg ", '<svg style="width:180px;height:180px" ')
-    + '<div style="font-size:12px;color:#666;margin-top:6px">Scan deze QR-code met de camera van de tablet</div>';
+  const q = qrcode(0, "L");
+  q.addData(url);
+  q.make();
+  vak.innerHTML = q.createSvgTag(4, 2) + '<div style="font-size:12px;color:#666;margin-top:6px">Scan deze QR-code met de camera van de tablet</div>';
   vak.style.display = "block";
 }
 init();
