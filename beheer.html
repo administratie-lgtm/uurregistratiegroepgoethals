@@ -73,17 +73,19 @@ function render(){const mij=mensen.find(m=>m.id===me.id);
   <button onclick="nieuweKiosk()">Tablet aanmaken & link kopiëren</button>
   <div id="k_link_vak"></div>
   <div style="margin-top:12px">
-    ${kiosken.map(k => {
+       ${kiosken.map(k => {
       const pl = (plaatsen.find(p => p.id === k.plaats_id) || {}).naam || "Onbekende locatie";
       return `<div style="padding:10px 0;border-top:1px solid #eee">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
           <div><b>${esc(k.naam)}</b> <span style="color:#666;font-size:13px">(${esc(pl)})</span></div>
           <div style="display:flex;gap:6px">
+            ${k.koppel_url ? `<button class="s" onclick="toonKioskQr('${k.id}','${esc(k.koppel_url)}')">QR-code</button>` : ''}
             ${k.koppel_url ? `<button class="s" onclick="navigator.clipboard.writeText('${esc(k.koppel_url)}');alert('Koppellink gekopieerd!')">Link kopiëren</button>` : ''}
             <button class="s" style="background:#b02a37;color:#fff" onclick="verwijderKiosk('${k.id}','${esc(k.naam)}')">Verwijderen</button>
           </div>
         </div>
         ${k.koppel_url ? `<input readonly value="${esc(k.koppel_url)}" onclick="this.select()" style="margin-top:6px;font-size:12px;background:#f7f5f8;color:#444">` : ''}
+        <div id="qr_${k.id}" style="display:none;margin-top:10px;text-align:center;background:#fff;padding:12px;border-radius:10px;border:1px solid #eee"></div>
       </div>`;
     }).join("") || '<div style="color:#666;font-size:13px">Nog geen tablets aangemaakt.</div>'}
   </div>
@@ -160,6 +162,12 @@ async function verwijderKiosk(id, naam) {
     await db.from("kiosken").update({ actief: false }).eq("id", id);
   }
   await load(); render();
+}
+function toonKioskQr(id, url) {
+  const vak = $("qr_" + id);
+  if (vak.style.display === "block") { vak.style.display = "none"; return; }
+  vak.innerHTML = `<img src="https://qrserver.com{encodeURIComponent(url)}" alt="QR" style="width:180px;height:180px"><div style="font-size:12px;color:#666;margin-top:6px">Scan deze QR-code met de camera van de tablet</div>`;
+  vak.style.display = "block";
 }
 init();
 </script></body></html>
