@@ -29,7 +29,7 @@ const opt=(arr,sel,leeg)=>(leeg?`<option value="">${leeg}</option>`:"")+arr.map(
 async function init(){const{data:{session}}=await db.auth.getSession();if(!session)return login();me=session.user;await load();render()}
 function login(){$("app").innerHTML=`<div class="card"><h3>Aanmelden als admin</h3><label>E-mail</label><input id="em" type="email"><label>Wachtwoord</label><input id="pw" type="password"><button onclick="inlog()">Aanmelden</button><div id="lm"></div></div>`}
 async function inlog(){const{error}=await db.auth.signInWithPassword({email:$("em").value,password:$("pw").value});if(error)$("lm").innerHTML=`<div class="msg bad">${esc(error.message)}</div>`;else init()}
-async function load(){const[a,b]=await Promise.all([db.from("profiles").select("id,naam,email,rol,manager_id,standaard_plaats_id,badge_actief,bedrijf").order("naam"),db.from("plaatsen").select("id,naam,type").in("type",["start","stal"]).order("naam")]);mensen=a.data||[];plaatsen=b.data||[]}
+async function load(){const[a,b]=await Promise.all([db.from("profiles").select("id,naam,email,rol,manager_id,standaard_plaats_id,badge_actief,bedrijf,rooster,verlofsaldo").order("naam"),db.from("plaatsen").select("id,naam,type").in("type",["start","stal"]).order("naam")]);mensen=a.data||[];plaatsen=b.data||[]}
 async function fn(body){const{data,error}=await db.functions.invoke("beheer-medewerkers",{body});
  if(error){let t=error.message;try{t=(await error.context.json()).fout||t}catch{}return{fout:t}}return data}
 async function klaar(r,ok){msg=r&&r.fout?{c:"bad",t:r.fout}:{c:"ok",t:ok};await load();render()}
@@ -64,10 +64,34 @@ function render(){const mij=mensen.find(m=>m.id===me.id);
  <div class="g" style="margin-top:8px"><div><label>Rol</label><select ${zelf?"disabled":""} onchange="upd('${m.id}','rol',this.value)">${opt([["medewerker","Medewerker"],["manager","Manager"],["admin","Admin"]],m.rol)}</select></div>
  <div><label>Startplaats</label><select onchange="upd('${m.id}','standaard_plaats_id',this.value)">${opt(P,m.standaard_plaats_id,"— geen vaste —")}</select></div>
  <div><label>Manager</label><select onchange="upd('${m.id}','manager_id',this.value)">${opt(M.filter(x=>x[0]!==m.id),m.manager_id,"— geen —")}</select></div>
- <div><label>Bedrijf</label><input value="${esc(m.bedrijf||'')}" onchange="upd('${m.id}','bedrijf',this.value)"></div></div>
- <button class="s" onclick="hernoem('${m.id}')">Naam wijzigen</button><button class="s" onclick="pin('${m.id}')">Pincode</button><button class="s" onclick="badge('${m.id}')">Nieuwe badge</button>
+  <div><label>Bedrijf</label><input value="${esc(m.bedrijf||'')}" onchange="upd('${m.id}','bedrijf',this.value)"></div>
+ <div><label>Verlofsaldo (uren)</label><input type="number" step="0.25" value="${m.verlofsaldo??0}" onchange="upd('${m.id}','verlofsaldo',this.value===''?0:parseFloat(this.value))"></div></div>
+ <button class="s" onclick="hernoem('${m.id}')">Naam wijzigen</button><button class="s" onclick="pin('${m.id}')">Pincode</button><button class="s" onclick="badge('${m.id}')">Nieuwe badge</button><button class="s" onclick="openRooster('${m.id}')">Uurrooster</button>
  ${gl?`<button class="s" onclick="mailToevoegen('${m.id}')">E-mail toevoegen</button>`:`<button class="s" onclick="mailToevoegen('${m.id}')">E-mail wijzigen</button><button class="s" onclick="mailOpnieuw('${m.id}')">Wachtwoordmail opnieuw</button><button class="s" onclick="link('${m.id}')">Link kopiëren</button>`}
  ${zelf?"":m.badge_actief?`<button class="s d" onclick="actief('${m.id}',false)">Uitschakelen</button>`:`<button class="s" onclick="actief('${m.id}',true)">Inschakelen</button>`}</div>`}).join("")}
  <button class="s" onclick="db.auth.signOut().then(login)">Afmelden</button>`}
+const DAGEN=["ma","di","wo","do","vr","za","zo"],DAG_LABEL={ma:"Ma",di:"Di",wo:"Wo",do:"Do",vr:"Vr",za:"Za",zo:"Zo"};
+let rUser=null,rData=null;
+function openRooster(id){
+  rUser=mensen.find(m=>m.id===id);if(!rUser)return;
+  const std={ma:8,di:8,wo:8,do:8,vr:6,za:0,zo:0},b=rUser.rooster&&Array.isArray(rUser.rooster.weken)&&rUser.rooster.weken.length?rUser.rooster:{startdatum:"2026-01-05",weken:[std]};
+  rData={startdatum:b.startdatum||"2026-01-05",weken:b.weken.map(w=>({...std,...w}))};tekenRoosterModal();
+}
+function zetCyclusLengte(n){const a=parseInt(n,10)||1;while(rData.weken.length<a)rData.weken.push({...rData.weken[0]});rData.weken=rData.weken.slice(0,a);tekenRoosterModal();}
+function kopieerWeek1(){for(let i=1;i<rData.weken.length;i++)rData.weken[i]={...rData.weken[0]};tekenRoosterModal();}
+async function bewaarRooster(){const{error}=await db.from("profiles").update({rooster:rData}).eq("id",rUser.id);sluitRooster();await klaar(error?{fout:error.message}:null,"Uurrooster opgeslagen voor "+rUser.naam);}
+function sluitRooster(){const el=$("r-modal");if(el)el.remove();}
+function tekenRoosterModal(){
+  sluitRooster();
+  const gem=((rData.weken.reduce((s,w)=>s+DAGEN.reduce((ws,d)=>ws+(Number(w[d])||0),0),0))/rData.weken.length).toFixed(2).replace(".00","");
+  const div=document.createElement("div");div.id="r-modal";div.style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:14px;z-index:99";
+  div.innerHTML=`<div class="card" style="max-width:640px;width:100%;max-height:90vh;overflow:auto;margin:0"><h3 style="margin-top:0">Uurrooster: ${esc(rUser.naam)}</h3>
+  <div class="g" style="margin-bottom:10px"><div><label>Cyclus (aantal weken)</label><select onchange="zetCyclusLengte(this.value)">${[1,2,4,5].map(n=>`<option value="${n}" ${rData.weken.length===n?"selected":""}>${n===1?"1 week (vast rooster)":n+" weken cyclus"}</option>`).join("")}</select></div>
+  <div><label>Startdatum Week 1 (maandag)</label><input type="date" value="${esc(rData.startdatum)}" onchange="rData.startdatum=this.value"></div></div>
+  ${rData.weken.length>1?`<button class="s" style="margin-bottom:8px" onclick="kopieerWeek1()">Kopieer Week 1 naar alle weken</button>`:""}
+  ${rData.weken.map((w,i)=>`<div style="border:1px solid #e6dde6;border-radius:10px;padding:8px;margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px"><b>Week ${i+1}</b><span class="mu">Totaal: ${DAGEN.reduce((s,d)=>s+(Number(w[d])||0),0)} u</span></div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">${DAGEN.map(d=>`<div><label style="text-align:center">${DAG_LABEL[d]}</label><input type="number" step="0.25" min="0" max="24" style="padding:6px;text-align:center" value="${w[d]??0}" onchange="rData.weken[${i}]['${d}']=parseFloat(this.value)||0;tekenRoosterModal()"></div>`).join("")}</div></div>`).join("")}
+  <div class="mu" style="margin:8px 0">Gemiddeld per week: <b>${gem} uur</b></div><button onclick="bewaarRooster()">Opslaan</button><button class="s" onclick="sluitRooster()">Annuleren</button></div>`;
+  document.body.appendChild(div);
+}
 init();
 </script></body></html>

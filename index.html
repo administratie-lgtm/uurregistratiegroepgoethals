@@ -15,6 +15,9 @@ button.out{background:#3a3340}button.sec{background:#fbe6fb;color:#a000a0}
 .msg{padding:10px;border-radius:10px;font-size:13px;margin-top:10px}.bad{background:#fbeaea;color:#c0392b}.ok{background:#e5f2ea;color:#2f7d4f}.warn{background:#fdf3df;color:#b7791f}
 .row{padding:8px 0;border-top:1px solid #dfe3dd}
 .hd{max-width:460px;margin:0 auto;padding:12px 14px 0;display:flex;align-items:center;gap:12px}.hd img{height:56px}.hd b{font-size:18px}
+.tabs{display:flex;gap:8px;margin-bottom:12px}.tabs button{margin-top:0;padding:10px}
+.badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;font-weight:600}
+.b-wacht{background:#fdf3df;color:#b7791f}.b-ok{background:#e5f2ea;color:#2f7d4f}.b-nee{background:#fbeaea;color:#c0392b}
 </style>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="logo.png">
@@ -33,20 +36,23 @@ const SUPABASE_URL="https://aalyfgtulrlmpkegkzub.supabase.co", SUPABASE_KEY="sb_
 const db=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=id=>document.getElementById(id), esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const T={dag_start:"Dag gestart",dag_einde:"Dag beëindigd",werf_aan:"Aangekomen op werf",werf_af:"Werf verlaten",pauze_start:"Pauze gestart",pauze_einde:"Pauze beëindigd"};
-let me,prof,plaatsen=[],regs=[],msg=null,sel=null;
+const V_TYPE={verlof:"Verlof (betaald)",vervangfeestdag:"Vervangfeestdag",recup:"Inhaalrust (recup)"};
+let me,prof,plaatsen=[],regs=[],aanvragen=[],msg=null,vMsg=null,sel=null,wisselSel=null,tab="klok";
 const hm=d=>new Date(d).toLocaleTimeString("nl-BE",{hour:"2-digit",minute:"2-digit"}), dur=m=>Math.floor(m/60)+"u "+String(Math.round(m%60)).padStart(2,"0")+"m";
 async function init(){const{data:{session}}=await db.auth.getSession();if(!session)return login();me=session.user;await load();render()}
 function login(){$("app").innerHTML=`<div class="card"><h2>Aanmelden</h2><input id="em" type="email" placeholder="E-mail"><input id="pw" type="password" placeholder="Wachtwoord"><button onclick="inlog()">Aanmelden</button><div id="lm"></div></div>`}
 async function inlog(){const{error}=await db.auth.signInWithPassword({email:$("em").value,password:$("pw").value});if(error)$("lm").innerHTML=`<div class="msg bad">${esc(error.message)}</div>`;else init()}
 async function load(){  const d0 = new Date(); d0.setHours(0, 0, 0, 0); const gisteren = new Date(d0.getTime() - 24 * 60 * 60 * 1000);
-  const [p, r, q] = await Promise.all([
-    db.from("plaatsen").select("*").eq("actief", true).order("naam"),
-    db.from("registraties").select("*").eq("user_id", me.id).gte("tijd", gisteren.toISOString()).order("tijd"),
-    db.from("profiles").select("id,naam,rol,manager_id,standaard_plaats_id,verlofsaldo").eq("id", me.id).single()
-  ]);
+   const [p, r, q, v] = await Promise.all([
+   db.from("plaatsen").select("*").eq("actief", true).order("naam"),
+   db.from("registraties").select("*").eq("user_id", me.id).gte("tijd", gisteren.toISOString()).order("tijd"),
+   db.from("profiles").select("id,naam,rol,manager_id,standaard_plaats_id,verlofsaldo").eq("id", me.id).single(),
+   db.from("verlofaanvragen").select("*").eq("user_id", me.id).order("aangemaakt_op",{ascending:false}).limit(15)
+   ]);
+ plaatsen = p.data || [];
+ prof = q.data;
+ aanvragen = v.data || [];
 
-  plaatsen = p.data || [];
-  prof = q.data;
 
   // Filter: toon alles van vandaag, én als er gisteren nog een dienst liep tot na middernacht, neem die hele dienst mee
   const alles = r.data || [];
@@ -89,18 +95,80 @@ async function klok(type,plaats){msg={c:"warn",t:"Locatie bepalen…"};render();
   if(error)throw new Error(error.message);msg={c:"ok",t:"Geregistreerd om "+hm(Date.now())+(pl&&plaatsen.find(x=>x.id===pl)?" – "+plaatsen.find(x=>x.id===pl).naam:"")+(a?" · "+a:"")}}
  catch(e){msg={c:"bad",t:e.message}}await load();render()}
 const btn=(t,a,c="")=>`<button class="${c}" onclick="${a}">${t}</button>`;
-function render(){const st=state(),c=calc(st),start=prof&&plaatsen.find(x=>x.id===prof.standaard_plaats_id),werven=plaatsen.filter(x=>x.type==="werf"),pn=id=>(plaatsen.find(x=>x.id===id)||{}).naam;
- const ended=st.day&&st.day.e!==null;let b="";
- if(!st.day)b=btn("Dag starten","klok('dag_start','auto')");
- else if(!ended){if(st.p)b=btn("Pauze beëindigen","klok('pauze_einde')");
-  else{b=st.w?btn("Vertrek van werf – uitklokken",`klok('werf_af','${st.w.id}')`,"out")
-   :(start?.type==="stal"?"":`<label class="mu">Naar welke werf?</label><select onchange="sel=this.value">${werven.map(w=>`<option value="${w.id}" ${w.id===sel?"selected":""}>${esc(w.naam)}</option>`).join("")}</select>`+btn("Aankomst op werf – inklokken","klok('werf_aan',sel)"))+btn("Dag beëindigen","klok('dag_einde','auto')","out");
-   b+=btn("Pauze starten","klok('pauze_start')","sec")}}
- else b=btn("Opnieuw starten (nieuwe dienst)","klok('dag_start','auto')");
- const s=!st.day?"Dag nog niet gestart":ended?"Werkdag afgesloten":st.p?"Pauze bezig":st.w?"Op werf: "+esc(pn(st.w.id)):"Onderweg / in Eeklo";
- $("app").innerHTML=`<div class="card"><div class="mu">${s}</div><div class="big">${dur(c.net)}</div><div class="mu">netto vandaag · op werven ${dur(c.wk)} · rijtijd/overig ${dur(c.rij)}</div>${b}
- ${msg?`<div class="msg ${msg.c}">${esc(msg.t)}</div>`:""}${c.bump?`<div class="msg warn">Pauze aangevuld tot 30 min (minimum bij meer dan 6 uur werk).</div>`:""}</div>
- <div class="card"><b>Vandaag</b>${regs.map(r=>`<div class="row"><b>${T[r.type]}</b> <span class="mu">${hm(r.tijd)}</span><div class="mu">${r.plaats_id?esc(pn(r.plaats_id))+"<br>":""}📍 ${esc(r.adres||r.lat+", "+r.lng)}</div></div>`).join("")||'<div class="mu">Nog geen registraties.</div>'}</div>
- <button class="sec" onclick="db.auth.signOut().then(login)">Afmelden</button>`}
-setInterval(()=>me&&render(),60000);init();
-</script></body></html>
+async function wisselWerf(oudeId, nieuweId){
+  if(!nieuweId || oudeId===nieuweId) return;
+  msg={c:"warn",t:"Locatie bepalen voor werf-wissel…"};render();
+  try{
+    const{coords:c}=await pos(), a=await adres(c.latitude,c.longitude), nu=new Date();
+    const base={user_id:me.id,lat:c.latitude,lng:c.longitude,nauwkeurigheid:Math.round(c.accuracy),adres:a};
+    const{error}=await db.from("registraties").insert([
+      {...base,type:"werf_af",plaats_id:oudeId,tijd:nu.toISOString()},
+      {...base,type:"werf_aan",plaats_id:nieuweId,tijd:new Date(nu.getTime()+1000).toISOString()}
+    ]);
+    if(error)throw new Error(error.message);
+    msg={c:"ok",t:`Gewisseld naar ${(plaatsen.find(x=>x.id===nieuweId)||{}).naam} om ${hm(Date.now())}`};
+    wisselSel=null;
+  }catch(e){msg={c:"bad",t:e.message}}
+  await load();render();
+}
+async function vraagVerlofAan(){
+  const type=$("v_type").value, start=$("v_start").value, eind=$("v_eind").value||start;
+  const urenVal=$("v_uren").value, reden=$("v_reden").value.trim();
+  if(!start){vMsg={c:"bad",t:"Kies een startdatum."};return render()}
+  if(eind<start){vMsg={c:"bad",t:"Einddatum mag niet voor startdatum liggen."};return render()}
+  const{error}=await db.from("verlofaanvragen").insert({user_id:me.id,type,start_datum:start,eind_datum:eind,uren_per_dag:urenVal?parseFloat(urenVal):null,reden:reden||null});
+  vMsg=error?{c:"bad",t:error.message}:{c:"ok",t:"Aanvraag ingediend!"};
+  await load();render();
+}
+async function annuleerAanvraag(id){
+  if(!confirm("Aanvraag intrekken?"))return;
+  await db.from("verlofaanvragen").delete().eq("id",id);
+  await load();render();
+}
+function render(){
+  const nav=`<div class="tabs"><button class="${tab==="klok"?"":"sec"}" onclick="tab='klok';render()">⏱ Klokken</button><button class="${tab==="verlof"?"":"sec"}" onclick="tab='verlof';render()">📅 Verlof & Recup</button></div>`;
+  if(tab==="verlof"){
+    const saldo=prof?.verlofsaldo!=null?Number(prof.verlofsaldo):0, vandaag=new Date().toISOString().slice(0,10);
+    const fmtD=d=>d?d.split("-").reverse().join("/"):"";
+    const stB=s=>s==="goedgekeurd"?'<span class="badge b-ok">Goedgekeurd</span>':s==="afgewezen"?'<span class="badge b-nee">Afgewezen</span>':'<span class="badge b-wacht">In behandeling</span>';
+    $("app").innerHTML=`${nav}<div class="card"><div class="mu">Beschikbaar verlofsaldo</div><div class="big" style="font-size:28px">${saldo} uur</div></div>
+    <div class="card"><b>Nieuwe aanvraag</b>
+      <label class="mu">Soort</label><select id="v_type"><option value="verlof">Verlof (betaald)</option><option value="vervangfeestdag">Vervangfeestdag</option><option value="recup">Inhaalrust (recup)</option></select>
+      <label class="mu">Vanaf</label><input id="v_start" type="date" value="${vandaag}" onchange="$('v_eind').value=this.value">
+      <label class="mu">Tot en met</label><input id="v_eind" type="date" value="${vandaag}">
+      <label class="mu">Uren per dag (leeg = volle dag)</label><input id="v_uren" type="number" step="0.25" min="0" max="24" placeholder="Leeg laten voor volle dag">
+      <label class="mu">Reden (optioneel)</label><input id="v_reden" placeholder="Bv. halve dag / vakantie">
+      ${btn("Aanvraag versturen","vraagVerlofAan()")}${vMsg?`<div class="msg ${vMsg.c}">${esc(vMsg.t)}</div>`:""}</div>
+    <div class="card"><b>Mijn aanvragen</b>${aanvragen.map(a=>`<div class="row"><div style="display:flex;justify-content:space-between"><b>${esc(V_TYPE[a.type]||a.type)}</b>${stB(a.status)}</div><div class="mu">${fmtD(a.start_datum)}${a.eind_datum!==a.start_datum?" t/m "+fmtD(a.eind_datum):""}${a.uren_per_dag?" · "+a.uren_per_dag+"u/dag":""}</div>${a.reden?`<div class="mu">“${esc(a.reden)}”</div>`:""}${a.status==="in_behandeling"?`<button class="sec" style="padding:6px;margin-top:6px;font-size:13px" onclick="annuleerAanvraag('${a.id}')">Intrekken</button>`:""}</div>`).join("")||'<div class="mu">Nog geen aanvragen.</div>'}</div>
+    <button class="sec" onclick="db.auth.signOut().then(login)">Afmelden</button>`;
+    return;
+  }
+
+  const st=state(),c=calc(st),start=prof&&plaatsen.find(x=>x.id===prof.standaard_plaats_id),werven=plaatsen.filter(x=>x.type==="werf"),pn=id=>(plaatsen.find(x=>x.id===id)||{}).naam;
+  const ended=st.day&&st.day.e!==null;let b="";
+  if(!st.day)b=btn("Dag starten","klok('dag_start','auto')");
+  else if(!ended){
+    if(st.p)b=btn("Pauze beëindigen","klok('pauze_einde')");
+    else{
+      if(st.w){
+        const andere=werven.filter(w=>w.id!==st.w.id);
+        if(!wisselSel||wisselSel===st.w.id) wisselSel=(andere[0]||{}).id;
+        b=btn("Vertrek van werf – uitklokken",`klok('werf_af','${st.w.id}')`,"out");
+        if(andere.length) b+=`<div style="margin-top:12px;padding-top:10px;border-top:1px dashed #dfe3dd"><label class="mu">Direct wisselen naar andere werf:</label><select onchange="wisselSel=this.value">${andere.map(w=>`<option value="${w.id}" ${w.id===wisselSel?"selected":""}>${esc(w.naam)}</option>`).join("")}</select>${btn("Wissel naar deze werf",`wisselWerf('${st.w.id}',wisselSel)`,"sec")}</div>`;
+      } else {
+        b=(start?.type==="stal"?"":`<label class="mu">Naar welke werf?</label><select onchange="sel=this.value">${werven.map(w=>`<option value="${w.id}" ${w.id===sel?"selected":""}>${esc(w.naam)}</option>`).join("")}</select>`+btn("Aankomst op werf – inklokken","klok('werf_aan',sel)"))+btn("Dag beëindigen","klok('dag_einde','auto')","out");
+      }
+      b+=btn("Pauze starten","klok('pauze_start')","sec");
+    }
+  }
+  else b=btn("Opnieuw starten (nieuwe dienst)","klok('dag_start','auto')");
+
+  const s=!st.day?"Dag nog niet gestart":ended?"Werkdag afgesloten":st.p?"Pauze bezig":st.w?"Op werf: "+esc(pn(st.w.id)):"Onderweg / in Eeklo";
+  $("app").innerHTML=`${nav}<div class="card"><div class="mu">${s}</div><div class="big">${dur(c.net)}</div><div class="mu">netto vandaag · op werven ${dur(c.wk)} · rijtijd/overig ${dur(c.rij)}</div>${b}
+  ${msg?`<div class="msg ${msg.c}">${esc(msg.t)}</div>`:""}${c.bump?`<div class="msg warn">Pauze aangevuld tot 30 min (minimum bij meer dan 6 uur werk).</div>`:""}</div>
+  <div class="card"><b>Vandaag</b>${regs.map(r=>`<div class="row"><b>${T[r.type]}</b> <span class="mu">${hm(r.tijd)}</span><div class="mu">${r.plaats_id?esc(pn(r.plaats_id))+"<br>":""}📍 ${esc(r.adres||r.lat+", "+r.lng)}</div></div>`).join("")||'<div class="mu">Nog geen registraties.</div>'}</div>
+  <button class="sec" onclick="db.auth.signOut().then(login)">Afmelden</button>`;
+}
+setInterval(()=>me&&tab==="klok"&&render(),60000);init();
+</script>
+</body></html>
