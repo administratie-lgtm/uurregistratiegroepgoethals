@@ -138,6 +138,7 @@ async function nieuweKiosk() {
   const koppelUrl = `${basis}kiosk.html#setup=${data.id}:${secret}`;
   await navigator.clipboard?.writeText(koppelUrl).catch(() => {});
   await load(); render();
+    prompt("Tablet aangemaakt! Kopieer deze koppellink en open hem één keer op de tablet:", koppelUrl);
   $("k_link_vak").innerHTML = `<div style="background:#e5f2ea;color:#2f7d4f;padding:10px;border-radius:10px;margin-top:10px;font-size:13px;word-break:break-all">
     <b>✓ Tablet aangemaakt!</b> De koppellink is gekopieerd. Open deze link één keer op de tablet:<br><br>
     <code>${koppelUrl}</code>
