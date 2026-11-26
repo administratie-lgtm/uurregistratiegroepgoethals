@@ -23,13 +23,13 @@ button.s{background:#fbe6fb;color:#a000a0;font-weight:500;padding:7px 10px;font-
 const SUPABASE_URL="https://aalyfgtulrlmpkegkzub.supabase.co", SUPABASE_KEY="sb_publishable_bkZUQu-mzukYkvwfQHzPhw_Z9I84E0c";
 const db=supabase.createClient(SUPABASE_URL,SUPABASE_KEY), $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-let me,mensen=[],plaatsen=[],msg=null;
+let me,mensen=[],plaatsen=[],kiosken=[],msg=null;
 const geenLogin=e=>!e||e.endsWith("@geen-login.invalid");
 const opt=(arr,sel,leeg)=>(leeg?`<option value="">${leeg}</option>`:"")+arr.map(([v,t])=>`<option value="${v}" ${v===sel?"selected":""}>${esc(t)}</option>`).join("");
 async function init(){const{data:{session}}=await db.auth.getSession();if(!session)return login();me=session.user;await load();render()}
 function login(){$("app").innerHTML=`<div class="card"><h3>Aanmelden als admin</h3><label>E-mail</label><input id="em" type="email"><label>Wachtwoord</label><input id="pw" type="password"><button onclick="inlog()">Aanmelden</button><div id="lm"></div></div>`}
 async function inlog(){const{error}=await db.auth.signInWithPassword({email:$("em").value,password:$("pw").value});if(error)$("lm").innerHTML=`<div class="msg bad">${esc(error.message)}</div>`;else init()}
-async function load(){const[a,b]=await Promise.all([db.from("profiles").select("id,naam,email,rol,manager_id,standaard_plaats_id,badge_actief,bedrijf,rooster,verlofsaldo").order("naam"),db.from("plaatsen").select("id,naam,type").in("type",["start","stal"]).order("naam")]);mensen=a.data||[];plaatsen=b.data||[]}
+async function load(){const[a,b,c]=await Promise.all([db.from("profiles").select("id,naam,email,rol,manager_id,standaard_plaats_id,badge_actief,bedrijf,rooster,verlofsaldo").order("naam"),db.from("plaatsen").select("id,naam,type").in("type",["start","stal"]).order("naam"),db.from("kiosken").select("*").order("created_at",{ascending:false})]);mensen=a.data||[];plaatsen=b.data||[];kiosken=c.data||[]}
 async function fn(body){const{data,error}=await db.functions.invoke("beheer-medewerkers",{body});
  if(error){let t=error.message;try{t=(await error.context.json()).fout||t}catch{}return{fout:t}}return data}
 async function klaar(r,ok){msg=r&&r.fout?{c:"bad",t:r.fout}:{c:"ok",t:ok};await load();render()}
@@ -67,8 +67,30 @@ function render(){const mij=mensen.find(m=>m.id===me.id);
   <div><label>Bedrijf</label><input value="${esc(m.bedrijf||'')}" onchange="upd('${m.id}','bedrijf',this.value)"></div>
  <div><label>Verlofsaldo (uren)</label><input type="number" step="0.25" value="${m.verlofsaldo??0}" onchange="upd('${m.id}','verlofsaldo',this.value===''?0:parseFloat(this.value))"></div></div>
  <button class="s" onclick="hernoem('${m.id}')">Naam wijzigen</button><button class="s" onclick="pin('${m.id}')">Pincode</button><button class="s" onclick="badge('${m.id}')">Nieuwe badge</button><button class="s" onclick="openRooster('${m.id}')">Uurrooster</button>
- ${gl?`<button class="s" onclick="mailToevoegen('${m.id}')">E-mail toevoegen</button>`:`<button class="s" onclick="mailToevoegen('${m.id}')">E-mail wijzigen</button><button class="s" onclick="mailOpnieuw('${m.id}')">Wachtwoordmail opnieuw</button><button class="s" onclick="link('${m.id}')">Link kopiëren</button>`}
+ ${gl?`<button class="s" onclick="mailToevoegen('${m.id}')">E-mail toevoegen</button>`:`<button class="s" onclick="mailToevoegen('${m.id}')">E-mail wijzigen</button><button class="s" onclick="mailOpnieuw('${m.id}')">Wachtwoordmail opnieuw</button><button class="s" onclick="link('${m.id}')">Link kopiëren</button><button class="s" onclick="welkomstMail('${m.id}','${esc(m.email)}','${esc(m.naam)}')">Welkomstmail + link</button>`}
  ${zelf?"":m.badge_actief?`<button class="s d" onclick="actief('${m.id}',false)">Uitschakelen</button>`:`<button class="s" onclick="actief('${m.id}',true)">Inschakelen</button>`}</div>`}).join("")}
+ <div class="card">
+  <h3>Tablets / Kiosken beheren</h3>
+  <div class="g">
+    <div><label>Naam tablet</label><input id="k_naam" placeholder="Bv. Tablet Kampelhof 1"></div>
+    <div><label>Vaste locatie (stal / kantoor)</label>
+      <select id="k_plaats">
+        ${plaatsen.map(p => `<option value="${p.id}">${esc(p.naam)}</option>`).join("")}
+      </select>
+    </div>
+  </div>
+  <button onclick="nieuweKiosk()">Tablet aanmaken & link kopiëren</button>
+  <div id="k_link_vak"></div>
+  <div style="margin-top:12px">
+    ${kiosken.map(k => {
+      const pl = (plaatsen.find(p => p.id === k.plaats_id) || {}).naam || "Onbekende locatie";
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid #eee">
+        <div><b>${esc(k.naam)}</b> <span style="color:#666;font-size:13px">(${esc(pl)})</span></div>
+        <button class="s" style="background:${k.actief ? '#3a3340' : '#2f7d4f'};color:#fff" onclick="toggleKiosk('${k.id}', ${!k.actief})">${k.actief ? 'Uitschakelen' : 'Activeren'}</button>
+      </div>`;
+    }).join("") || '<div style="color:#666;font-size:13px">Nog geen tablets aangemaakt.</div>'}
+  </div>
+</div>
  <button class="s" onclick="db.auth.signOut().then(login)">Afmelden</button>`}
 const DAGEN=["ma","di","wo","do","vr","za","zo"],DAG_LABEL={ma:"Ma",di:"Di",wo:"Wo",do:"Do",vr:"Vr",za:"Za",zo:"Zo"};
 let rUser=null,rData=null;
@@ -92,6 +114,56 @@ function tekenRoosterModal(){
   ${rData.weken.map((w,i)=>`<div style="border:1px solid #e6dde6;border-radius:10px;padding:8px;margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px"><b>Week ${i+1}</b><span class="mu">Totaal: ${DAGEN.reduce((s,d)=>s+(Number(w[d])||0),0)} u</span></div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">${DAGEN.map(d=>`<div><label style="text-align:center">${DAG_LABEL[d]}</label><input type="number" step="0.25" min="0" max="24" style="padding:6px;text-align:center" value="${w[d]??0}" onchange="rData.weken[${i}]['${d}']=parseFloat(this.value)||0;tekenRoosterModal()"></div>`).join("")}</div></div>`).join("")}
   <div class="mu" style="margin:8px 0">Gemiddeld per week: <b>${gem} uur</b></div><button onclick="bewaarRooster()">Opslaan</button><button class="s" onclick="sluitRooster()">Annuleren</button></div>`;
   document.body.appendChild(div);
+}
+async function welkomstMail(id, email, naam) {
+  await mailOpnieuw(id);
+  const appUrl = "https://administratie-lgtm.github.io/uurregistratiegroepgoethals/";
+  const onderwerp = encodeURIComponent("Uitnodiging Uurregistratie Groep Goethals");
+  const tekst = encodeURIComponent(
+`Dag ${naam || ""},
+
+Je account voor de uurregistratie van Groep Goethals staat klaar!
+
+1. Je hebt net een aparte e-mail ontvangen waarmee je jouw eigen wachtwoord kunt instellen.
+2. Open daarna onze uren-app op je gsm via deze link:
+${appUrl}
+
+Tip om hem als app op je startscherm te zetten:
+- iPhone (Safari): tik onderaan op het Deel-icoontje en kies 'Zet op beginscherm'.
+- Android (Chrome): tik rechtsboven op de 3 puntjes en kies 'Toevoegen aan startscherm'.
+
+Groeten,`
+  );
+  window.open(`mailto:${email}?subject=${onderwerp}&body=${tekst}`, "_blank");
+}
+async function sha256Hex(tekst) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(tekst));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function nieuweKiosk() {
+  const naam = $("k_naam").value.trim();
+  const plaats_id = $("k_plaats").value;
+  if (!naam) return alert("Vul eerst een naam in voor de tablet (bv. Tablet Kampelhof 1).");
+
+  const secret = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, "0")).join("");
+  const secret_hash = await sha256Hex(secret);
+
+  const { data, error } = await db.from("kiosken").insert({ naam, plaats_id, secret_hash, actief: true }).select().single();
+  if (error) return alert("Kon tablet niet aanmaken: " + error.message);
+
+  const koppelUrl = `https://github.io{data.id}:${secret}`;
+  await navigator.clipboard?.writeText(koppelUrl).catch(() => {});
+  await load(); render();
+  $("k_link_vak").innerHTML = `<div style="background:#e5f2ea;color:#2f7d4f;padding:10px;border-radius:10px;margin-top:10px;font-size:13px;word-break:break-all">
+    <b>✓ Tablet aangemaakt!</b> De koppellink is gekopieerd. Open deze link één keer op de tablet:<br><br>
+    <code>${koppelUrl}</code>
+  </div>`;
+}
+
+async function toggleKiosk(id, actief) {
+  await db.from("kiosken").update({ actief }).eq("id", id);
+  await load(); render();
 }
 init();
 </script></body></html>
