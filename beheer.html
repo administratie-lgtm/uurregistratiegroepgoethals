@@ -134,8 +134,9 @@ async function nieuweKiosk() {
   const { data, error } = await db.from("kiosken").insert({ naam, plaats_id, secret_hash, actief: true }).select().single();
   if (error) return alert("Kon tablet niet aanmaken: " + error.message);
 
-  const basis = location.protocol.startsWith("http") ? location.href.replace(/beheer\.html.*$/, "") : "https://" + "administratie-lgtm.github.io/uurregistratiegroepgoethals/";
+   const basis = location.protocol.startsWith("http") ? location.href.replace(/beheer\.html.*$/, "") : "https://" + "administratie-lgtm.github.io/uurregistratiegroepgoethals/";
   const koppelUrl = `${basis}kiosk.html#setup=${data.id}:${secret}`;
+  await db.from("kiosken").update({ koppel_url: koppelUrl }).eq("id", data.id);
   await navigator.clipboard?.writeText(koppelUrl).catch(() => {});
   await load(); render();
     prompt("Tablet aangemaakt! Kopieer deze koppellink en open hem één keer op de tablet:", koppelUrl);
