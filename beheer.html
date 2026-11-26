@@ -60,15 +60,6 @@ function render(){const mij=mensen.find(m=>m.id===me.id);
  <div><label>Bedrijf</label><input id="n_bedrijf"></div>
  <div><label>Pincode (optioneel)</label><input id="n_pin" inputmode="numeric" maxlength="6"></div></div>
  <button onclick="voegToe()">Toevoegen</button><div class="mu">Met e-mail: de medewerker krijgt een link en kiest zelf een wachtwoord.</div></div>
- ${mensen.map(m=>{const gl=geenLogin(m.email),zelf=m.id===me.id;return `<div class="card"><b>${esc(m.naam)}</b> ${gl?'<span class="tag u">enkel tablet</span>':`<span class="tag">${esc(m.email)}</span>`}${m.badge_actief?"":' <span class="tag u">uitgeschakeld</span>'}
- <div class="g" style="margin-top:8px"><div><label>Rol</label><select ${zelf?"disabled":""} onchange="upd('${m.id}','rol',this.value)">${opt([["medewerker","Medewerker"],["manager","Manager"],["admin","Admin"]],m.rol)}</select></div>
- <div><label>Startplaats</label><select onchange="upd('${m.id}','standaard_plaats_id',this.value)">${opt(P,m.standaard_plaats_id,"— geen vaste —")}</select></div>
- <div><label>Manager</label><select onchange="upd('${m.id}','manager_id',this.value)">${opt(M.filter(x=>x[0]!==m.id),m.manager_id,"— geen —")}</select></div>
-  <div><label>Bedrijf</label><input value="${esc(m.bedrijf||'')}" onchange="upd('${m.id}','bedrijf',this.value)"></div>
- <div><label>Verlofsaldo (uren)</label><input type="number" step="0.25" value="${m.verlofsaldo??0}" onchange="upd('${m.id}','verlofsaldo',this.value===''?0:parseFloat(this.value))"></div></div>
- <button class="s" onclick="hernoem('${m.id}')">Naam wijzigen</button><button class="s" onclick="pin('${m.id}')">Pincode</button><button class="s" onclick="badge('${m.id}')">Nieuwe badge</button><button class="s" onclick="openRooster('${m.id}')">Uurrooster</button>
- ${gl?`<button class="s" onclick="mailToevoegen('${m.id}')">E-mail toevoegen</button>`:`<button class="s" onclick="mailToevoegen('${m.id}')">E-mail wijzigen</button><button class="s" onclick="mailOpnieuw('${m.id}')">Wachtwoordmail opnieuw</button><button class="s" onclick="link('${m.id}')">Link kopiëren</button><button class="s" onclick="welkomstMail('${m.id}','${esc(m.email)}','${esc(m.naam)}')">Welkomstmail + link</button>`}
- ${zelf?"":m.badge_actief?`<button class="s d" onclick="actief('${m.id}',false)">Uitschakelen</button>`:`<button class="s" onclick="actief('${m.id}',true)">Inschakelen</button>`}</div>`}).join("")}
  <div class="card">
   <h3>Tablets / Kiosken beheren</h3>
   <div class="g">
@@ -91,6 +82,15 @@ function render(){const mij=mensen.find(m=>m.id===me.id);
     }).join("") || '<div style="color:#666;font-size:13px">Nog geen tablets aangemaakt.</div>'}
   </div>
 </div>
+ ${mensen.map(m=>{const gl=geenLogin(m.email),zelf=m.id===me.id;return `<div class="card"><b>${esc(m.naam)}</b> ${gl?'<span class="tag u">enkel tablet</span>':`<span class="tag">${esc(m.email)}</span>`}${m.badge_actief?"":' <span class="tag u">uitgeschakeld</span>'}
+ <div class="g" style="margin-top:8px"><div><label>Rol</label><select ${zelf?"disabled":""} onchange="upd('${m.id}','rol',this.value)">${opt([["medewerker","Medewerker"],["manager","Manager"],["admin","Admin"]],m.rol)}</select></div>
+ <div><label>Startplaats</label><select onchange="upd('${m.id}','standaard_plaats_id',this.value)">${opt(P,m.standaard_plaats_id,"— geen vaste —")}</select></div>
+ <div><label>Manager</label><select onchange="upd('${m.id}','manager_id',this.value)">${opt(M.filter(x=>x[0]!==m.id),m.manager_id,"— geen —")}</select></div>
+  <div><label>Bedrijf</label><input value="${esc(m.bedrijf||'')}" onchange="upd('${m.id}','bedrijf',this.value)"></div>
+ <div><label>Verlofsaldo (uren)</label><input type="number" step="0.25" value="${m.verlofsaldo??0}" onchange="upd('${m.id}','verlofsaldo',this.value===''?0:parseFloat(this.value))"></div></div>
+ <button class="s" onclick="hernoem('${m.id}')">Naam wijzigen</button><button class="s" onclick="pin('${m.id}')">Pincode</button><button class="s" onclick="badge('${m.id}')">Nieuwe badge</button><button class="s" onclick="openRooster('${m.id}')">Uurrooster</button>
+ ${gl?`<button class="s" onclick="mailToevoegen('${m.id}')">E-mail toevoegen</button>`:`<button class="s" onclick="mailToevoegen('${m.id}')">E-mail wijzigen</button><button class="s" onclick="mailOpnieuw('${m.id}')">Wachtwoordmail opnieuw</button><button class="s" onclick="link('${m.id}')">Link kopiëren</button><button class="s" onclick="welkomstMail('${m.id}','${esc(m.email)}','${esc(m.naam)}')">Welkomstmail + link</button>`}
+ ${zelf?"":m.badge_actief?`<button class="s d" onclick="actief('${m.id}',false)">Uitschakelen</button>`:`<button class="s" onclick="actief('${m.id}',true)">Inschakelen</button>`}</div>`}).join("")}
  <button class="s" onclick="db.auth.signOut().then(login)">Afmelden</button>`}
 const DAGEN=["ma","di","wo","do","vr","za","zo"],DAG_LABEL={ma:"Ma",di:"Di",wo:"Wo",do:"Do",vr:"Vr",za:"Za",zo:"Zo"};
 let rUser=null,rData=null;
@@ -116,25 +116,7 @@ function tekenRoosterModal(){
   document.body.appendChild(div);
 }
 async function welkomstMail(id, email, naam) {
-  await mailOpnieuw(id);
-  const appUrl = "https://administratie-lgtm.github.io/uurregistratiegroepgoethals/";
-  const onderwerp = encodeURIComponent("Uitnodiging Uurregistratie Groep Goethals");
-  const tekst = encodeURIComponent(
-`Dag ${naam || ""},
-
-Je account voor de uurregistratie van Groep Goethals staat klaar!
-
-1. Je hebt net een aparte e-mail ontvangen waarmee je jouw eigen wachtwoord kunt instellen.
-2. Open daarna onze uren-app op je gsm via deze link:
-${appUrl}
-
-Tip om hem als app op je startscherm te zetten:
-- iPhone (Safari): tik onderaan op het Deel-icoontje en kies 'Zet op beginscherm'.
-- Android (Chrome): tik rechtsboven op de 3 puntjes en kies 'Toevoegen aan startscherm'.
-
-Groeten,`
-  );
-  window.open(`mailto:${email}?subject=${onderwerp}&body=${tekst}`, "_blank");
+  await klaar(await fn({ actie: "email_toevoegen", id, email }), "Welkomstmail met uitleg verstuurd naar " + email);
 }
 async function sha256Hex(tekst) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(tekst));
@@ -152,7 +134,8 @@ async function nieuweKiosk() {
   const { data, error } = await db.from("kiosken").insert({ naam, plaats_id, secret_hash, actief: true }).select().single();
   if (error) return alert("Kon tablet niet aanmaken: " + error.message);
 
-  const koppelUrl = `https://github.io{data.id}:${secret}`;
+  const basis = location.protocol.startsWith("http") ? location.href.replace(/beheer\.html.*$/, "") : "https://" + "administratie-lgtm.github.io/uurregistratiegroepgoethals/";
+  const koppelUrl = `${basis}kiosk.html#setup=${data.id}:${secret}`;
   await navigator.clipboard?.writeText(koppelUrl).catch(() => {});
   await load(); render();
   $("k_link_vak").innerHTML = `<div style="background:#e5f2ea;color:#2f7d4f;padding:10px;border-radius:10px;margin-top:10px;font-size:13px;word-break:break-all">
