@@ -103,6 +103,10 @@ tr.feestdag td { border-color: #ffcdd2; }
       <div class="stat s-grijs"><b id="tot-dagen">0</b>Gewerkte dagen</div>
       <div class="stat s-paars"><b id="tot-overuren">+00:00</b>Overuren saldo</div>
     </div>
+      <div style="margin:-8px 0 14px;display:flex;gap:10px;align-items:center" class="no-print">
+    <button style="background:#6a1b9a;font-size:12px;padding:5px 10px" onclick="resetOverurenNaarNul()">Overuren uitbetaald → teller op 0 zetten vanaf volgende maand</button>
+    <span id="overuren-info" style="font-size:12px;color:#666"></span>
+  </div>
     <table>
       <thead>
         <tr>
@@ -284,7 +288,7 @@ function klokDetails(lijst) {
     document.getElementById("app-vak").classList.remove("verborgen");
     document.getElementById("maand-keuze").value = new Date().toISOString().slice(0, 7);
     const [teamRes, plaatsRes] = await Promise.all([
-      db.from("profiles").select("id, naam, bedrijf, rooster, verlofsaldo, overurensaldo").order("naam"),
+      db.from("profiles").select("id, naam, bedrijf, rooster, verlofsaldo, overurensaldo, overuren_vanaf").order("naam"),
       db.from("plaatsen").select("id, naam")
     ]);
     alleMensen = teamRes.data || [];
@@ -306,28 +310,78 @@ function klokDetails(lijst) {
     laadMaandstaat();
   }
   async function laadMaandstaat() {
-    const userId = document.getElementById("medewerker-keuze").value;
-    const maand = document.getElementById("maand-keuze").value;
-    if (!userId || !maand) return;
-    const persoon = alleMensen.find(m => m.id === userId) || {};
-    const [jaar, mnd] = maand.split("-").map(Number);
-    const aantalDagen = new Date(jaar, mnd, 0).getDate();
-    document.getElementById("rapport-naam").textContent = persoon.naam || "-";
-    document.getElementById("afdruktijd").textContent = new Date().toLocaleString("nl-BE", { dateStyle: "short", timeStyle: "short" });
-    document.getElementById("rapport-bedrijf").textContent = persoon.bedrijf ? "Bedrijf: " + persoon.bedrijf : "";
-    document.getElementById("rapport-periode").textContent =
-      "01/" + String(mnd).padStart(2,"0") + "/" + jaar + " - " + aantalDagen + "/" + String(mnd).padStart(2,"0") + "/" + jaar;
-    const startDatum = new Date(jaar, mnd - 1, 1).toISOString();
-    const eindDatum = new Date(jaar, mnd, 2).toISOString();
-      const [{ data: regels }, { data: afwLijst }] = await Promise.all([
-    db.from("registraties").select("id, tijd, type, plaats_id").eq("user_id", userId).gte("tijd", startDatum).lt("tijd", eindDatum).order("tijd", { ascending: true }),
-    db.from("afwezigheden").select("*").eq("user_id", userId).gte("datum", `${jaar}-${String(mnd).padStart(2, "0")}-01`).lte("datum", `${jaar}-${String(mnd).padStart(2, "0")}-${String(aantalDagen).padStart(2, "0")}`)
-  ]);
-  const perDag = groepeerPerWerkdag(regels, jaar, mnd), feestdagen = belgischeFeestdagen(jaar), dagNamen = ["zo", "ma", "di", "wo", "do", "vr", "za"];
-  huidigeAfwMap = {}; (afwLijst || []).forEach(a => huidigeAfwMap[a.datum] = a);
-  let html = "", totaalNettoMin = 0, totaalPauzeMin = 0, gewerkteDagen = 0, totaalOverurenMin = 0;
-  huidigeExportData = []; huidigePerDag = perDag;
+  const userId = document.getElementById("medewerker-keuze").value;
+  const maand = document.getElementById("maand-keuze").value;
+  if (!userId || !maand) return;
+  const persoon = alleMensen.find(m => m.id === userId) || {};
+  const [jaar, mnd] = maand.split("-").map(Number);
+  const aantalDagen = new Date(jaar, mnd, 0).getDate();
+  document.getElementById("rapport-naam").textContent = persoon.naam || "-";
+  document.getElementById("afdruktijd").textContent = new Date().toLocaleString("nl-BE", { dateStyle: "short", timeStyle: "short" });
+  document.getElementById("rapport-bedrijf").textContent = persoon.bedrijf ? "Bedrijf: " + persoon.bedrijf : "";
+  document.getElementById("rapport-periode").textContent =
+    "01/" + String(mnd).padStart(2, "0") + "/" + jaar + " - " + aantalDagen + "/" + String(mnd).padStart(2, "0") + "/" + jaar;
 
+  const resetVanaf = persoon.overuren_vanaf || "2026-01-01";
+  const maandStartIso = `${jaar}-${String(mnd).padStart(2, "0")}-01`;
+  const maandEindIso = `${jaar}-${String(mnd).padStart(2, "0")}-${String(aantalDagen).padStart(2, "0")}`;
+  const haalVanafIso = resetVanaf < maandStartIso ? resetVanaf : maandStartIso;
+
+  const startDatum = new Date(haalVanafIso + "T00:00:00").toISOString();
+  const eindDatum = new Date(jaar, mnd, 2).toISOString();
+
+  const [{ data: regels }, { data: afwLijst }] = await Promise.all([
+    db.from("registraties").select("id, tijd, type, plaats_id").eq("user_id", userId).gte("tijd", startDatum).lt("tijd", eindDatum).order("tijd", { ascending: true }),
+    db.from("afwezigheden").select("*").eq("user_id", userId).gte("datum", haalVanafIso).lte("datum", maandEindIso)
+  ]);
+
+  const perDag = groepeerPerWerkdag(regels, jaar, mnd), feestdagen = belgischeFeestdagen(jaar), dagNamen = ["zo", "ma", "di", "wo", "do", "vr", "za"];
+  huidigeAfwMap = {}; (afwLijst || []).forEach(a => { if (a.datum >= maandStartIso) huidigeAfwMap[a.datum] = a; });
+
+  // Cumulatief overurensaldo berekenen vanaf resetVanaf t/m einde gekozen maand
+  const vandaag = new Date();
+  let cumOverurenMin = Math.round((Number(persoon.overurensaldo) || 0) * 60);
+  const perDagAlle = {};
+  (regels || []).forEach(r => {
+    const dt = new Date(r.tijd);
+    const k = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+    (perDagAlle[k] = perDagAlle[k] || []).push({ ...r, dt });
+  });
+  const afwAlle = {};
+  (afwLijst || []).forEach(a => afwAlle[a.datum] = a);
+
+  let cur = new Date(resetVanaf + "T12:00:00");
+  const eindLimiet = new Date(jaar, mnd - 1, aantalDagen, 12, 0, 0);
+  while (cur <= eindLimiet) {
+    const k = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}-${String(cur.getDate()).padStart(2, "0")}`;
+    const fd = belgischeFeestdagen(cur.getFullYear())[k] || null;
+    const afw = afwAlle[k] || null;
+    const plan = geplandeMinuten(persoon, cur);
+    const l = perDagAlle[k] || [];
+    let nMin = 0;
+    if (l.length) {
+      const bMin = werkMinuten(l);
+      const s1 = l.some(x => x.type === "dag_start" || x.type === "werf_aan");
+      const e1 = l.some(x => x.type === "dag_einde" || x.type === "werf_af");
+      let pMin = 0, ps = null;
+      l.forEach(x => { if (x.type === "pauze_start") ps = x.dt; if (x.type === "pauze_einde" && ps) { pMin += (x.dt - ps) / 60000; ps = null; } });
+      if (s1 && e1 && bMin > 0) {
+        let tp = Math.round(pMin);
+        if (bMin > 360 && tp < 30) tp = 30;
+        nMin = Math.max(0, Math.round(bMin) - tp);
+      }
+    }
+    let gMin = fd ? plan : 0;
+    if (afw && afw.type !== "onbetaald") gMin = afw.uren != null && afw.uren !== "" ? Math.round(Number(afw.uren) * 60) : plan;
+    const isVandaag = cur.getFullYear() === vandaag.getFullYear() && cur.getMonth() === vandaag.getMonth() && cur.getDate() === vandaag.getDate();
+    const nogBezig = isVandaag && nMin === 0 && l.length > 0;
+    const isToek = (cur > vandaag || nogBezig) && nMin === 0 && !afw && !fd;
+    if (!isToek) cumOverurenMin += (nMin + gMin) - plan;
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  let html = "", totaalNettoMin = 0, totaalPauzeMin = 0, gewerkteDagen = 0;
+  huidigeExportData = []; huidigePerDag = perDag;
   for (let d = 1; d <= aantalDagen; d++) {
     const datumObj = new Date(jaar, mnd - 1, d), isoDatum = `${jaar}-${String(mnd).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
     const isWeekend = datumObj.getDay() === 0 || datumObj.getDay() === 6, dagLabel = dagNamen[datumObj.getDay()] + " " + d + "/" + mnd;
@@ -335,7 +389,6 @@ function klokDetails(lijst) {
     const trClass = feestNaam ? "feestdag" : isWeekend ? "weekend" : "";
     const tags = [feestNaam ? `<span class="tag-fd">${feestNaam}</span>` : "", afw ? `<span class="tag-afw">${AFW_LABEL[afw.type] || afw.type}${afw.uren ? " (" + afw.uren + "u)" : ""}</span>` : ""].filter(Boolean).join(" ");
     const lijst = perDag[d];
-
     let nettoMin = 0, pauzeTekst = "--", nettoTekst = "--", locaties = "", inTijd = "--", uitTijd = "--";
     if (lijst && lijst.length > 0) {
       const det = klokDetails(lijst), brutoMin = werkMinuten(lijst);
@@ -352,27 +405,24 @@ function klokDetails(lijst) {
         nettoTekst = det.duurL.length > 1 ? det.duurL.join("<br>") + `<br><b>Totaal ${formatMinuten(nettoMin)}</b>` : `<b>${formatMinuten(nettoMin)}</b>`;
       }
     }
-
     let gedektMin = feestNaam ? planMin : 0;
     if (afw && afw.type !== "onbetaald") gedektMin = afw.uren != null && afw.uren !== "" ? Math.round(Number(afw.uren) * 60) : planMin;
-  const vandaag = new Date();
-  const isVandaag = datumObj.getFullYear() === vandaag.getFullYear() && datumObj.getMonth() === vandaag.getMonth() && datumObj.getDate() === vandaag.getDate();
-  const nogBezig = isVandaag && nettoMin === 0 && lijst && lijst.length > 0;
-  const dagSaldoMin = (nettoMin + gedektMin) - planMin;
-  const isToekomst = (datumObj > vandaag || nogBezig) && nettoMin === 0 && !afw && !feestNaam;
-  if (!isToekomst) totaalOverurenMin += dagSaldoMin;
-  const locKolom = [locaties, tags].filter(Boolean).join("<br>");
-  const saldoTxt = isToekomst || (dagSaldoMin === 0 && planMin === 0 && nettoMin === 0) ? "--" : `<span class="${dagSaldoMin >= 0 ? "plus" : "min"}">${formatSaldo(dagSaldoMin)}</span>`;
-  html += `<tr class="${trClass}"><td>${dagLabel}</td><td>${locKolom}</td><td>${inTijd}</td><td>${uitTijd}</td><td class="rechts">${pauzeTekst}</td><td class="rechts">${nettoTekst}</td><td class="rechts">${saldoTxt}</td><td class="no-print" style="text-align:right;"><button class="sec" style="padding:2px 7px;font-size:11px;" onclick="openBewerkModal(${jaar},${mnd},${d})">✏️ Edit</button></td></tr>`;
-  huidigeExportData.push([dagLabel, locKolom, inTijd, uitTijd, pauzeTekst, nettoTekst, isToekomst ? "" : formatSaldo(dagSaldoMin)].map(v => String(v).replace(/<br>/g, " / ").replace(/<[^>]*>/g, "")));
-}
-const startSaldoMin = Math.round((Number(persoon.overurensaldo) || 0) * 60);
-document.getElementById("maand-tabel").innerHTML = html;
-document.getElementById("tot-gewerkt").textContent = formatMinuten(totaalNettoMin);
-document.getElementById("tot-pauze").textContent = formatMinuten(totaalPauzeMin);
-document.getElementById("tot-dagen").textContent = gewerkteDagen;
-document.getElementById("tot-overuren").textContent = formatSaldo(startSaldoMin + totaalOverurenMin);
+    const isVandaag = datumObj.getFullYear() === vandaag.getFullYear() && datumObj.getMonth() === vandaag.getMonth() && datumObj.getDate() === vandaag.getDate();
+    const nogBezig = isVandaag && nettoMin === 0 && lijst && lijst.length > 0;
+    const dagSaldoMin = (nettoMin + gedektMin) - planMin;
+    const isToekomst = (datumObj > vandaag || nogBezig) && nettoMin === 0 && !afw && !feestNaam;
+    const locKolom = [locaties, tags].filter(Boolean).join("<br>");
+    const saldoTxt = isToekomst || (dagSaldoMin === 0 && planMin === 0 && nettoMin === 0) ? "--" : `<span class="${dagSaldoMin >= 0 ? "plus" : "min"}">${formatSaldo(dagSaldoMin)}</span>`;
+    html += `<tr class="${trClass}"><td>${dagLabel}</td><td>${locKolom}</td><td>${inTijd}</td><td>${uitTijd}</td><td class="rechts">${pauzeTekst}</td><td class="rechts">${nettoTekst}</td><td class="rechts">${saldoTxt}</td><td class="no-print" style="text-align:right;"><button class="sec" style="padding:2px 7px;font-size:11px;" onclick="openBewerkModal(${jaar},${mnd},${d})">✏️ Edit</button></td></tr>`;
+    huidigeExportData.push([dagLabel, locKolom, inTijd, uitTijd, pauzeTekst, nettoTekst, isToekomst ? "" : formatSaldo(dagSaldoMin)].map(v => String(v).replace(/<br>/g, " / ").replace(/<[^>]*>/g, "")));
   }
+  document.getElementById("maand-tabel").innerHTML = html;
+  document.getElementById("tot-gewerkt").textContent = formatMinuten(totaalNettoMin);
+  document.getElementById("tot-pauze").textContent = formatMinuten(totaalPauzeMin);
+  document.getElementById("tot-dagen").textContent = gewerkteDagen;
+  document.getElementById("tot-overuren").textContent = formatSaldo(cumOverurenMin);
+  document.getElementById("overuren-info").textContent = `Teller loopt vanaf ${resetVanaf.split("-").reverse().join("/")} (startsaldo: ${persoon.overurensaldo || 0}u)`;
+}
   function exporteerExcel() {
   const naam = document.getElementById("rapport-naam").textContent;
   const maand = document.getElementById("maand-keuze").value;
@@ -800,6 +850,20 @@ async function verwerkAanvraag(id, goedkeuren) {
 
   await db.from("verlofaanvragen").update({ status: "goedgekeurd" }).eq("id", id);
   await laadVerlofAanvragen();
+  laadMaandstaat();
+}
+async function resetOverurenNaarNul() {
+  const userId = document.getElementById("medewerker-keuze").value;
+  const maand = document.getElementById("maand-keuze").value;
+  const persoon = alleMensen.find(m => m.id === userId);
+  if (!persoon || !maand) return;
+  const [jaar, mnd] = maand.split("-").map(Number);
+  const volgendeMaand = mnd === 12 ? `${jaar + 1}-01-01` : `${jaar}-${String(mnd + 1).padStart(2, "0")}-01`;
+  if (!confirm(`Zijn de overuren van ${persoon.naam} t/m ${String(mnd).padStart(2,"0")}/${jaar} uitbetaald?\n\nDe overurenteller wordt dan vanaf ${volgendeMaand.split("-").reverse().join("/")} op 00:00 gezet.`)) return;
+  const { error } = await db.from("profiles").update({ overurensaldo: 0, overuren_vanaf: volgendeMaand }).eq("id", userId);
+  if (error) return alert("Reset mislukt: " + error.message);
+  persoon.overurensaldo = 0;
+  persoon.overuren_vanaf = volgendeMaand;
   laadMaandstaat();
 }
 
