@@ -284,7 +284,7 @@ function klokDetails(lijst) {
     document.getElementById("app-vak").classList.remove("verborgen");
     document.getElementById("maand-keuze").value = new Date().toISOString().slice(0, 7);
     const [teamRes, plaatsRes] = await Promise.all([
-      db.from("profiles").select("id, naam, bedrijf,rooster, verlofsaldo").order("naam"),
+      db.from("profiles").select("id, naam, bedrijf, rooster, verlofsaldo, overurensaldo").order("naam"),
       db.from("plaatsen").select("id, naam")
     ]);
     alleMensen = teamRes.data || [];
@@ -355,21 +355,23 @@ function klokDetails(lijst) {
 
     let gedektMin = feestNaam ? planMin : 0;
     if (afw && afw.type !== "onbetaald") gedektMin = afw.uren != null && afw.uren !== "" ? Math.round(Number(afw.uren) * 60) : planMin;
-    const dagSaldoMin = (nettoMin + gedektMin) - planMin;
-    const isToekomst = datumObj > new Date() && nettoMin === 0 && !afw && !feestNaam;
-    if (!isToekomst) totaalOverurenMin += dagSaldoMin;
-
-    const locKolom = [locaties, tags].filter(Boolean).join("<br>");
-    const saldoTxt = isToekomst || (dagSaldoMin === 0 && planMin === 0 && nettoMin === 0) ? "--" : `<span class="${dagSaldoMin >= 0 ? "plus" : "min"}">${formatSaldo(dagSaldoMin)}</span>`;
-    html += `<tr class="${trClass}"><td>${dagLabel}</td><td>${locKolom}</td><td>${inTijd}</td><td>${uitTijd}</td><td class="rechts">${pauzeTekst}</td><td class="rechts">${nettoTekst}</td><td class="rechts">${saldoTxt}</td><td class="no-print" style="text-align:right;"><button class="sec" style="padding:2px 7px;font-size:11px;" onclick="openBewerkModal(${jaar},${mnd},${d})">✏️</button></td></tr>`;
-    huidigeExportData.push([dagLabel, locKolom, inTijd, uitTijd, pauzeTekst, nettoTekst, isToekomst ? "" : formatSaldo(dagSaldoMin)].map(v => String(v).replace(/<br>/g, " / ").replace(/<[^>]*>/g, "")));
-  }
-
-  document.getElementById("maand-tabel").innerHTML = html;
-  document.getElementById("tot-gewerkt").textContent = formatMinuten(totaalNettoMin);
-  document.getElementById("tot-pauze").textContent = formatMinuten(totaalPauzeMin);
-  document.getElementById("tot-dagen").textContent = gewerkteDagen;
-  document.getElementById("tot-overuren").textContent = formatSaldo(totaalOverurenMin);
+  const vandaag = new Date();
+  const isVandaag = datumObj.getFullYear() === vandaag.getFullYear() && datumObj.getMonth() === vandaag.getMonth() && datumObj.getDate() === vandaag.getDate();
+  const nogBezig = isVandaag && nettoMin === 0 && lijst && lijst.length > 0;
+  const dagSaldoMin = (nettoMin + gedektMin) - planMin;
+  const isToekomst = (datumObj > vandaag || nogBezig) && nettoMin === 0 && !afw && !feestNaam;
+  if (!isToekomst) totaalOverurenMin += dagSaldoMin;
+  const locKolom = [locaties, tags].filter(Boolean).join("<br>");
+  const saldoTxt = isToekomst || (dagSaldoMin === 0 && planMin === 0 && nettoMin === 0) ? "--" : `<span class="${dagSaldoMin >= 0 ? "plus" : "min"}">${formatSaldo(dagSaldoMin)}</span>`;
+  html += `<tr class="${trClass}"><td>${dagLabel}</td><td>${locKolom}</td><td>${inTijd}</td><td>${uitTijd}</td><td class="rechts">${pauzeTekst}</td><td class="rechts">${nettoTekst}</td><td class="rechts">${saldoTxt}</td><td class="no-print" style="text-align:right;"><button class="sec" style="padding:2px 7px;font-size:11px;" onclick="openBewerkModal(${jaar},${mnd},${d})">✏️ Edit</button></td></tr>`;
+  huidigeExportData.push([dagLabel, locKolom, inTijd, uitTijd, pauzeTekst, nettoTekst, isToekomst ? "" : formatSaldo(dagSaldoMin)].map(v => String(v).replace(/<br>/g, " / ").replace(/<[^>]*>/g, "")));
+}
+const startSaldoMin = Math.round((Number(persoon.overurensaldo) || 0) * 60);
+document.getElementById("maand-tabel").innerHTML = html;
+document.getElementById("tot-gewerkt").textContent = formatMinuten(totaalNettoMin);
+document.getElementById("tot-pauze").textContent = formatMinuten(totaalPauzeMin);
+document.getElementById("tot-dagen").textContent = gewerkteDagen;
+document.getElementById("tot-overuren").textContent = formatSaldo(startSaldoMin + totaalOverurenMin);
   }
   function exporteerExcel() {
   const naam = document.getElementById("rapport-naam").textContent;
