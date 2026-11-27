@@ -350,8 +350,13 @@ function klokDetails(lijst) {
   const afwAlle = {};
   (afwLijst || []).forEach(a => afwAlle[a.datum] = a);
 
-  let cur = new Date(resetVanaf + "T12:00:00");
+   const alleDagenKeys = Object.keys(perDagAlle).sort();
+  const eersteKlokDag = alleDagenKeys.length ? alleDagenKeys : null;
+  const effectieveStart = (!eersteKlokDag || eersteKlokDag > resetVanaf) ? eersteKlokDag : resetVanaf;
+
+  let cur = effectieveStart ? new Date(effectieveStart + "T12:00:00") : new Date("2099-01-01T12:00:00");
   const eindLimiet = new Date(jaar, mnd - 1, aantalDagen, 12, 0, 0);
+
   while (cur <= eindLimiet) {
     const k = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}-${String(cur.getDate()).padStart(2, "0")}`;
     const fd = belgischeFeestdagen(cur.getFullYear())[k] || null;
